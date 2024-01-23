@@ -51,7 +51,7 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig {
 class WikiStreamConfigWikiVibes extends WikiStreamConfig {
 	public $toolkey = "wikivibes";
 	public $tool_db = 'vibes_p';
-	public $whitelist_page = 'Help:WikiVibes/audio whitelist';
+	public $whitelist_page = ''; # 'Help:WikiVibes/audio whitelist';
 	public $sparql = "SELECT ?q ?file { ?q wdt:P51 ?file ; wdt:P31/wdt:P279* wd:Q2188189 }";
 	public $people_props = [
 		50, # author
@@ -74,6 +74,9 @@ class WikiStreamConfigWikiVibes extends WikiStreamConfig {
 	public $file_props = [51];
 	public $bad_sections = [105543609];
 	public $skip_section_q = [838368,226730];
+	public $interface_config = [
+		'missing_icon' => 'Missing-image-232x150.png'
+	];
 
 	public function add_special_sections(&$ws,&$out) {
 		# Nothing

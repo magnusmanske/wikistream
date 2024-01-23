@@ -395,6 +395,8 @@ class WikiStream {
 
 		$out['section_total'] = count($this->get_top_sections(PHP_INT_MAX));
 
+		$out['misc'] = $this->config->interface_config;
+
 		return $out ;
 	}
 
@@ -491,11 +493,12 @@ class WikiStream {
 	public function generate_main_page_data() {
 		$out = $this->get_main_page_data();
 		$out = 'var config = ' . json_encode($out) . ';' ;
-		$filename = '/data/project/wikivibes/public_html/config.js';
+		$filename = __DIR__.'/../public_html/config.js';
 		file_put_contents($filename,$out);
 	}
 
 	public function import_item_whitelist() {
+		if ( $this->config->whitelist_page=='' ) return;
 		$qs = [];
 		$existing_item_qs = $this->get_items_in_db();
 		$wt = $this->tfc->getWikiPageText('wikidatawiki',$this->config->whitelist_page);

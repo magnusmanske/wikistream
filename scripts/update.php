@@ -27,7 +27,7 @@ if ( isset($argv[1]) and $argv[1]=='json' ) {
 } else {
 	$ws->update_from_sparql();
 	$ws->make_rc_unavailable();
-	// $ws->import_item_whitelist();
+	$ws->import_item_whitelist();
 	$ws->add_missing_item_details();	
 	$ws->update_persons();
 	$ws->import_missing_section_labels();

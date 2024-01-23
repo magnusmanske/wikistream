@@ -35,7 +35,7 @@ div.entry-container {
     <div class='thumbnail-container'>
         <router-link :to="'/entry/'+entry.q">
             <commons-thumbnail v-if='entry.image!=null' loading="lazy" :filename='entry.image' videothumbnail='1' width='200' nolink='1'></commons-thumbnail>
-            <commons-thumbnail v-else filename='Missing-image-232x150.png' loading="lazy" width='200' nolink='1'></commons-thumbnail>
+            <commons-thumbnail v-else :filename='missing_icon()' loading="lazy" width='200' nolink='1'></commons-thumbnail>
         </router-link>
         <div class="legend">
             {{entry.title}}
@@ -56,6 +56,7 @@ Vue.component ( 'entry-thumb' , {
     updated : function () { tt.updateInterface(this.$el) ; } ,
     mounted : function () { tt.updateInterface(this.$el) ; } ,
     methods : {
+        missing_icon: function () { return config.misc.missing_icon; }
     } ,
 	template : '#entry-thumb-template'
 } ) ;
