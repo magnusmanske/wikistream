@@ -1,0 +1,29 @@
+<template id='main-page-template'>
+<div class='container-fluid'>
+    <page-header></page-header>
+    <div class="row" style="width:100%;">
+        <div style="width:5%;"></div>
+        <div style="width: 90%; overflow: auto;">
+            <section-row v-for='section in sections' :section="section"></section-row>
+        </div>
+        <div style="width:5%;"></div>
+    </div>
+</div>
+</template>
+
+<script>
+'use strict';
+
+let MainPage = Vue.extend ( {
+    props : [] ,
+    data : function () { return { sections:[] } } ,
+    created : function () {
+        this.sections = config.sections ;
+    } ,
+    updated : function () { tt.updateInterface(this.$el) ; } ,
+    mounted : function () { tt.updateInterface(this.$el) ; } ,
+    methods : {
+    } ,
+    template:'#main-page-template'
+} ) ;
+</script>

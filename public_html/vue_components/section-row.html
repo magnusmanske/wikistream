@@ -1,0 +1,70 @@
+<style>
+div.section {
+    margin-bottom: 1rem;
+}
+span.section-total-plain {
+    color: #AAA;
+    font-size: 9pt;
+}
+span.section-total {
+    visibility: hidden;
+    color: #AAA;
+    font-size: 9pt;
+}
+div.section h3:hover span.section-total {
+    visibility: visible;
+}
+div.section h3 a {
+    color: white;
+}
+div.section h3 a:hover{
+    text-decoration: none;
+    color: white;
+}
+div.section-single-row {
+    display:flex;
+    overflow: auto;
+}
+div.section-multi-row {
+    display:flex;
+    flex-wrap:wrap;
+}
+div.section-multi-row div.entry-container {
+    margin-bottom: 1rem;
+}
+</style>
+
+<template id='section-row-template'>
+<div class='section'>
+    <h3 v-if="typeof section!='undefined'" class="text-capitalize">
+        <span v-if="nolink || typeof section.q=='undefined'">{{section.title}}</span>
+        <router-link v-else-if="typeof section.prop=='undefined'" :to="'/section/'+section.q">{{section.title}}</router-link>
+        <router-link v-else :to="'/section/'+section.q+'/'+(section.prop||'')">{{section.title}}</router-link>
+        <span v-if="nolink" class="section-total-plain">{{section.total}}</span>
+        <span v-else class="section-total">{{section.total}}</span>
+    </h3>
+    <div v-if="typeof section!='undefined'" :class="multi_row?'section-multi-row':'section-single-row'">
+        <entry-thumb v-for='entry in section.entries' :entry='entry'></entry-thumb>
+    </div>
+    <div v-else :class="multi_row?'section-multi-row':'section-single-row'">
+        <entry-thumb v-for='entry in entries' :entry='entry'></entry-thumb>
+    </div>
+</div>
+</template>
+
+
+<script>
+'use strict';
+
+Vue.component ( 'section-row' , {
+	props : ['section','nolink','multi_row','entries'] ,
+	data : function () { return {} } ,
+    created : function () {} ,
+    updated : function () { tt.updateInterface(this.$el) ; } ,
+    mounted : function () { tt.updateInterface(this.$el) ; } ,
+    methods : {
+    } ,
+	template : '#section-row-template'
+} ) ;
+
+</script>

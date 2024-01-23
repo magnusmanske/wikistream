@@ -1,0 +1,57 @@
+<template id='sections-page-template'>
+<div class='container-fluid'>
+    <page-header></page-header>
+    <div class="row" style="width:100%;">
+        <div v-if='loading'>
+            <i tt='loading'></i>
+        </div>
+        <div v-else style="width: 100%;display: flex;">
+            <div style="flex-grow: 1;"></div>
+            <table class="table table-striped" style="width: 50%;">
+                <thead>
+                    <tr>
+                        <th tt="section"></th>
+                        <th tt="movies_in_section"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr v-for="s in sections">
+                        <td>
+                            <router-link :to='"/section/"+s.section_q+"/"+s.property' class="text-capitalize">
+                                {{s.label}}
+                            </router-link>
+                        </td>
+                        <td>{{s.cnt}}</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div style="flex-grow: 1;"></div>
+        </div>
+    </div>
+
+</div>
+</template>
+
+<script>
+'use strict';
+
+let SectionsPage = Vue.extend ( {
+    props : [] ,
+    data : function () { return { loading:true,sections:[] } } ,
+    created : function () {
+        let self = this;
+        fetch("./api.php?action=get_all_sections")
+        .then(results => {
+            results.json().then( j => {
+                self.sections=j.data;
+                self.loading = false;
+            })
+        })
+    } ,
+    updated : function () { tt.updateInterface(this.$el) ; } ,
+    mounted : function () { tt.updateInterface(this.$el) ; } ,
+    methods : {
+    } ,
+    template:'#sections-page-template'
+} ) ;
+</script>

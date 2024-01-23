@@ -1,0 +1,42 @@
+<template id='section-page-template'>
+<div class='container-fluid'>
+    <page-header></page-header>
+    <div class="row" style="width:100%;">
+        <div v-if='loading'>
+            <i tt='loading'></i>
+        </div>
+        <div v-else>
+            <div>
+                <section-row :section="section" nolink="1" multi_row="1"></section-row>
+            </div>
+        </div>
+    </div>
+
+</div>
+</template>
+
+<script>
+'use strict';
+
+let SectionPage = Vue.extend ( {
+    props : ['section_q','section_prop'] ,
+    data : function () { return { loading:true,section:{} } } ,
+    created : function () {
+        let self = this;
+        let url = "./api.php?action=get_section&max=all&q="+self.section_q;
+        if ( typeof self.section_prop!='undefined' ) url += "&prop="+self.section_prop;
+        fetch(url)
+        .then(results => {
+            results.json().then( j => {
+                self.section=j.data;
+                self.loading = false;
+            })
+        })
+    } ,
+    updated : function () { tt.updateInterface(this.$el) ; } ,
+    mounted : function () { tt.updateInterface(this.$el) ; } ,
+    methods : {
+    } ,
+    template:'#section-page-template'
+} ) ;
+</script>

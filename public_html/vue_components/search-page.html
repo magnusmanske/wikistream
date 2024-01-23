@@ -1,0 +1,85 @@
+<style>
+</style>
+
+<template id='search-page-template'>
+<div class='container-fluid'>
+    <page-header></page-header>
+    <div class="row" style="width:100%;">
+        <div style="width:5%;"></div>
+        <div style="width: 90%">
+            <div style="display:flex;">
+                <div style="flex-grow: 1;"></div>
+                <form style="display: flex;">
+                    <input id="main-search-query" class="form-control" style="width: 20rem;" type="text" v-model="query" tt_title="enter_to_search" />
+                    <input type="submit" class="btn" @click.prevent="run_search_from_form" />
+                </form>
+                <div style="flex-grow: 1;"></div>
+            </div>
+
+            <div v-if='loading'><i tt='loading'></i></div>
+            <div v-else-if="query==''"></div>
+            <div v-else-if="entries.length+sections.length+people.length==0">
+                <i tt="no_search_results"></i>
+            </div>
+            <div v-else style="width: 100%;">
+                <div v-if="entries.length>0">
+                    <h3 tt="entries"></h3>
+                    <section-row :entries="entries" multi_row='1'></section-row>
+                </div>
+                <div v-if="people.length>0">
+                    <h3 tt="people"></h3>
+                    <div style="display: flex; flex-wrap: 1;">
+                        <person-thumb v-for="person in people" :person='person'></person-thumb>
+                    </div>
+                </div>
+                <div v-if="sections.length>0">
+                    <section-row v-for="section in sections" :section="section"></section-row>
+                </div>
+            </div>
+        </div>
+        <div style="width:5%;"></div>
+    </div>
+
+</div>
+</template>
+
+<script>
+'use strict';
+
+let SearchPage = Vue.extend ( {
+    props : ['initial_query'] ,
+    data : function () { return { loading:true,query:'',entries:[],sections:[],people:[] } } ,
+    created : function () {
+        if ( typeof this.initial_query!='undefined' ) {
+            this.query = this.initial_query;
+            this.run_search();
+        } else {
+            this.loading = false;
+            $("#main-search-query").focus();
+        }
+    } ,
+    updated : function () { tt.updateInterface(this.$el) ; } ,
+    mounted : function () { tt.updateInterface(this.$el) ; } ,
+    methods : {
+        run_search_from_form : function () {
+            if ( this.query=='' ) return ;
+            this.$router.push ( '/search/'+this.query );
+        },
+        run_search : function () {
+            if ( this.query=='' ) return ;
+            this.loading = true;
+            fetch("./api.php?action=search&query="+this.query)
+            .then(results => {
+                results.json().then( j => {
+                    this.entries = j.data.entries;
+                    this.sections = j.data.sections;
+                    this.people = j.data.people;
+                    this.loading = false;
+                    $("#main-search-query").focus();
+                })
+            })
+        }
+    } ,
+    template:'#search-page-template'
+} ) ;
+</script>

@@ -1,0 +1,53 @@
+<!DOCTYPE HTML>
+<html><head>
+<META NAME="ROBOTS" CONTENT="NOINDEX, NOFOLLOW">
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title tt="toolname"></title>
+<link rel="stylesheet" href="https://tools-static.wmflabs.org/cdnjs/ajax/libs/twitter-bootstrap/4.0.0/css/bootstrap.min.css">
+<!-- <link rel="stylesheet" href="https://tools-static.wmflabs.org/magnustools/resources/html/wikimedia.css"> -->
+<script src="https://tools-static.wmflabs.org/cdnjs/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+<script src="https://tools-static.wmflabs.org/cdnjs/ajax/libs/twitter-bootstrap/4.0.0/js/bootstrap.bundle.min.js"></script>
+<script src="https://tools-static.wmflabs.org/cdnjs/ajax/libs/vue/2.5.13/vue.min.js"></script>
+<script src="https://tools-static.wmflabs.org/cdnjs/ajax/libs/vue-router/3.0.1/vue-router.min.js"></script>
+<script src="https://tools-static.wmflabs.org/tooltranslate/tt.js"></script>
+<script src="https://tools-static.wmflabs.org/magnustools/resources/js/wikidata.js"></script>
+<script src="https://tools-static.wmflabs.org/magnustools/resources/vue/shared.js"></script>
+<script src="config.js"></script>
+
+<style>
+#working {
+	display:none;
+}
+body {
+	background-color: black;
+	color: white;
+	margin-left:0.5rem;
+	margin-right:0.5rem;
+}
+</style>
+
+</head>
+
+<body>
+	<div id='app'>
+<!-- 		<tool-navbar>
+			<template slot='left'>
+				<li class="nav-item navthing">
+					<a class='btn btn-outline-secondary' target='_blank' href='https://github.com/magnusmanske/cradle' tt='git'></a>
+				</li>
+				<li class="nav-item navthing">
+					<a id='help_page' class='btn btn-outline-info' target='_blank' href='#' tt='help'></a>
+				</li>
+				<li class="nav-item navthing" id='working'>
+					<img src='https://upload.wikimedia.org/wikipedia/commons/c/cd/Vector_Loading_fallback.gif' />
+				</li>
+			</template>
+			<template slot='right'><widar></widar></template>
+		</tool-navbar> -->
+		<router-view :key="$route.path"><i tt='loading'></i></router-view>
+	</div>
+</body>
+
+<script src="vue.js"></script>
+
+</html>

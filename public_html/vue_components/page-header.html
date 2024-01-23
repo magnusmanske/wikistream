@@ -1,0 +1,69 @@
+<style>
+div.page-header {
+    display: flex;
+    align-items: baseline;
+    height: 3rem;
+}
+div.page-header a:hover{
+    text-decoration: none;
+}
+.page-header-movies-total {
+    visibility: hidden;
+    font-size: 9pt;
+    color: #AAA;
+    margin-left: 1rem;
+}
+div.page-header:hover .page-header-movies-total {
+    visibility: visible;
+}
+</style>
+
+<template id='page-header-template'>
+<div class="row page-header">
+    <router-link to="/"><h1 style="color: red" tt='toolname'></h1></router-link>
+    <a href="https://www.wikidata.org/wiki/Help:WikiVibes" style="color: red; margin-left: 0.5rem;">ⓘ</a>
+    <div class="page-header-movies-total">
+        {{entry_total}} <span tt="movies_total"></span>
+        {{person_total}} <span tt="people_in"></span>
+        <router-link to='/sections'>
+            {{section_total}} <span tt="sections_total"></span>
+        </router-link>
+    </div>
+    <div style="flex-grow: 1;"></div>
+    <form style="display: none;">
+        <input class="form-control" style="display: inline; vertical-align: baseline; width: 15rem;" type="text" v-model="search_query" tt_title="enter_to_search" />
+        <input type="submit" style="display: none;" @click.prevent="do_search" />
+    </form>
+    <a href='#' @click.prevent="toggle_search_bar" style="font-size: 24pt; margin-left: 0.5rem;">
+        &#x1f50d;
+    </a>
+</div>
+</template>
+
+
+<script>
+'use strict';
+
+Vue.component ( 'page-header' , {
+	props : [] ,
+	data : function () { return { search_query:'', entry_total:0,section_total:0,person_total:0 } } ,
+    created : function () {
+        this.entry_total = config.entry_total;
+        this.person_total = config.person_total;
+        this.section_total = config.section_total;
+    } ,
+    updated : function () { tt.updateInterface(this.$el) ; } ,
+    mounted : function () { tt.updateInterface(this.$el) ; } ,
+    methods : {
+        toggle_search_bar : function () {
+            $(this.$el).find("form").toggle()
+            $(this.$el).find("form").children(":first").focus();
+        } ,
+        do_search : function () {
+            this.$router.push ( '/search/'+this.search_query );
+        }
+    } ,
+	template : '#page-header-template'
+} ) ;
+
+</script>

@@ -1,0 +1,69 @@
+<style>
+div.person-description {
+    margin: 0.5rem;
+}
+</style>
+
+<template id='person-page-template'>
+<div class='container-fluid'>
+    <page-header></page-header>
+    <div class="row" style="width:100%;">
+        <div v-if='loading'>
+            <i tt='loading'></i>
+        </div>
+        <div v-else>
+            <div style="display:flex;margin-bottom: 1rem;">
+                <div style="width:280px; text-align: center;">
+                    <commons-thumbnail v-if='typeof person.image!="undefined" && person.image!=null && person.image!=""' :filename='person.image' width='260' height='400'></commons-thumbnail>
+                </div>
+                <div style="margin-left: 1rem;">
+                    <div style="flex-grow: 1;display: flex;">
+                        <h2>{{person.label}}</h2>
+                        <div style="margin-left:1rem;">
+                            <a :href='"https://www.wikidata.org/wiki/Q"+person.q' class='wikidata' target="_blank">
+                                <img border='0' src='https://upload.wikimedia.org/wikipedia/commons/thumb/e/e4/Wikidata-logo_S.svg/32px-Wikidata-logo_S.svg.png' />
+                            </a>
+                        </div>
+                    </div>
+                    <div v-if='description!=""' class="person-description">
+                        {{description}}
+                    </div>
+                </div>
+            </div>
+            <h3 tt='movies'></h3>
+            <section-row :movies="person.movies" multi_row="1"></section-row>
+        </div>
+    </div>
+
+</div>
+</template>
+
+<script>
+'use strict';
+
+let PersonPage = Vue.extend ( {
+    props : ['q'] ,
+    mixins : [wikipediaDescriptionMixin],
+    data : function () { return { loading:true,person:{},description:'' } } ,
+    created : function () {
+        let self = this;
+        let q = self.q*1;
+        fetch("./api.php?action=get_person&q="+q)
+        .then(results => {
+            results.json().then( j => {
+                self.person = j.data;
+                self.loading = false;
+            })
+        });
+
+        self.load_description("Q"+q,'en',function(desc){
+            if ( typeof desc!='undefined' && desc!='' ) self.description = desc;
+        });
+    } ,
+    updated : function () { tt.updateInterface(this.$el) ; } ,
+    mounted : function () { tt.updateInterface(this.$el) ; } ,
+    methods : {
+    } ,
+    template:'#person-page-template'
+} ) ;
+</script>

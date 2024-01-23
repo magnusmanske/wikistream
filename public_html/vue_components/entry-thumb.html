@@ -1,0 +1,63 @@
+<style>
+div.entry-container {
+    width:220px;
+    height:200px;
+    max-width:220px;
+    min-width:220px;
+    margin-right: 0.1rem;
+}
+.entry-container div.legend {
+    position:absolute;
+    left:0px;
+    right:0px;
+    bottom:0px;
+    background-color: white;
+    z-index:5;
+    opacity: 0.5;
+    color: black;
+    font-size: 9pt;
+}
+.entry-container div.thumbnail-container {
+    text-align: center;
+    position: relative;
+    height:200px;
+}
+.entry-container div.thumbnail-container:hover .legend {
+    opacity: 1;
+}
+.entry-container div.thumbnail-container:hover {
+    opacity: 0.5;
+}
+</style>
+
+<template id='entry-thumb-template'>
+<div class='entry-container'>
+    <div class='thumbnail-container'>
+        <router-link :to="'/entry/'+entry.q">
+            <commons-thumbnail v-if='entry.image!=null' loading="lazy" :filename='entry.image' videothumbnail='1' width='200' nolink='1'></commons-thumbnail>
+            <commons-thumbnail v-else filename='Missing-image-232x150.png' loading="lazy" width='200' nolink='1'></commons-thumbnail>
+        </router-link>
+        <div class="legend">
+            {{entry.title}}
+            <div v-if='entry.minutes!=null'>[{{entry.minutes}} min]</siv>
+        </div>
+    </div>
+</div>
+</template>
+
+
+<script>
+'use strict';
+
+Vue.component ( 'entry-thumb' , {
+	props : ['entry'] ,
+	data : function () { return {} } ,
+    created : function () {} ,
+    updated : function () { tt.updateInterface(this.$el) ; } ,
+    mounted : function () { tt.updateInterface(this.$el) ; } ,
+    methods : {
+    } ,
+	template : '#entry-thumb-template'
+} ) ;
+
+</script>

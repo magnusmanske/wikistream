@@ -1,0 +1,58 @@
+<style>
+div.person-box {
+    width:260px;
+    max-width:260px;
+    height:360px;
+    border: 1px solid #DDD;
+    margin:0.2rem;
+    padding:0.1rem;
+    text-align: center;
+}
+div.person-picture {
+    width:260px;
+    max-width:260px;
+    height:300px;
+    margin-bottom: 0.2rem;
+}
+div.person-picture:hover {
+    opacity: 0.5;
+}
+div.person-box a {
+    text-decoration: none;
+    color: white;
+}
+</style>
+
+<template id='person-thumb-template'>
+<div class="person-box">
+    <router-link :to="'/person/'+person.q">
+        <div class="person-picture">
+            <commons-thumbnail v-if='person.image!=""' loading="lazy" nolink="1" :filename='person.image' width='250' height='300'></commons-thumbnail>
+        </div>
+        <div>
+            {{person.label}}
+            <!-- {{person.item.getLabel()}} -->
+            <span v-if='typeof person.as!="undefined" && person.as!=""' class="text-truncate" style="font-size: 8pt;">
+                <br/><span tt='as'></span> {{person.as}}
+            </span>
+        </div>
+    </router-link>
+</div>
+</template>
+
+
+<script>
+'use strict';
+
+Vue.component ( 'person-thumb' , {
+	props : ['person'] ,
+	data : function () { return {} } ,
+    created : function () {} ,
+    updated : function () { tt.updateInterface(this.$el) ; } ,
+    mounted : function () { tt.updateInterface(this.$el) ; } ,
+    methods : {
+    } ,
+	template : '#person-thumb-template'
+} ) ;
+
+</script>
