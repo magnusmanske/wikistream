@@ -43,7 +43,7 @@ var wikipediaDescriptionMixin = {
 };
 
 $(document).ready ( function () {
-    vue_components.toolname = 'wikivibes' ;
+    vue_components.toolname = config.misc.toolname ;
     Promise.all ( [
         vue_components.loadComponents ( ['wd-date','wd-link','tool-translate','tool-navbar','commons-thumbnail','widar','autodesc','typeahead-search','value-validator',
             'vue_components/entry-thumb.html',

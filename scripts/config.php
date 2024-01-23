@@ -33,7 +33,8 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig {
 	public $bad_sections = [11424];
 	public $skip_section_q = [838368,226730];
 	public $interface_config = [
-		'missing_icon' => 'Missing-image-232x150.png'
+		'missing_icon' => 'Missing-image-232x150.png',
+		'toolname' => 'wikiflix',
 	];
 
 	public function add_special_sections(&$ws,&$out) {
@@ -77,7 +78,8 @@ class WikiStreamConfigWikiVibes extends WikiStreamConfig {
 	public $bad_sections = [105543609];
 	public $skip_section_q = [838368,226730];
 	public $interface_config = [
-		'missing_icon' => 'Missing-image-232x150.png'
+		'missing_icon' => 'Missing-image-232x150.png',
+		'toolname' => 'wikivibes',
 	];
 
 	public function add_special_sections(&$ws,&$out) {
