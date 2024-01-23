@@ -2,7 +2,6 @@
 
 
 class WikiStreamConfig {
-
 	function get_config_instance() {
 		$config_file_name = __DIR__."/../config.json";
 		if ( !file_exists($config_file_name) ) die ( "{$config_file_name} does not exists" ) ;
@@ -33,12 +32,15 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig {
 	public $file_props = [10,724,1651,4015];
 	public $bad_sections = [11424];
 	public $skip_section_q = [838368,226730];
+	public $interface_config = [
+		'missing_icon' => 'Missing-image-232x150.png'
+	];
 
 	public function add_special_sections(&$ws,&$out) {
-		$out['sections'][] = [
-			'title' => "Female directors",
-			'entries' => $this->get_items_by_female_directors($ws,25)
-		];
+		// $out['sections'][] = [
+		// 	'title' => "Female directors",
+		// 	'entries' => $this->get_items_by_female_directors($ws,25)
+		// ];
 	}
 
 

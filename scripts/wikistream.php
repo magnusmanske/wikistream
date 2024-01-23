@@ -280,7 +280,7 @@ class WikiStream {
 		return $this->get_item_view('vw_ranked_entries',$num,$section_q);
 	}
 
-	protected function get_item_view($view_name,$num=25,$section_q=null) {
+	public function get_item_view($view_name,$num=25,$section_q=null) {
 		$ret = [];
 		$sql = "SELECT * FROM `{$view_name}`";
 		if ( isset($section_q) and $section_q!=null ) $sql .= " WHERE `q` IN (SELECT item_q FROM section WHERE section_q={$section_q})";
