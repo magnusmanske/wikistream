@@ -1,12 +1,11 @@
 <template id='main-page-template'>
 <div class='container-fluid'>
     <page-header></page-header>
-    <div class="row" style="width:100%;">
-        <div style="width:5%;"></div>
-        <div style="width: 90%; overflow: auto;">
+    <div class="row">
+        <div style="width:2%;"></div>
+        <div style="width: 98%; overflow: auto;">
             <section-row v-for='section in sections' :section="section"></section-row>
         </div>
-        <div style="width:5%;"></div>
     </div>
 </div>
 </template>
