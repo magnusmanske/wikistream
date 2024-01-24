@@ -48,6 +48,9 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig {
 	public $interface_config = [
 		'missing_icon' => 'Missing-image-232x150.png',
 		'toolname' => 'wikiflix',
+		'performer_prop' => 'P161',
+		'associated_people_props' => [57],
+		'help_page' => 'https://www.wikidata.org/wiki/Help:WikiFlix',
 	];
 
 	public function add_special_sections(&$ws,&$out) {
@@ -95,6 +98,9 @@ class WikiStreamConfigWikiVibes extends WikiStreamConfig {
 	public $interface_config = [
 		'missing_icon' => 'Missing-image-232x150.png',
 		'toolname' => 'wikivibes',
+		'performer_prop' => 'P175',
+		'associated_people_props' => [],
+		'help_page' => 'https://www.wikidata.org/wiki/Help:WikiVibes',
 	];
 
 	public function add_special_sections(&$ws,&$out) {

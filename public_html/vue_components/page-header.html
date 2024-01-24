@@ -21,7 +21,7 @@ div.page-header:hover .page-header-movies-total {
 <template id='page-header-template'>
 <div class="row page-header">
     <router-link to="/"><h1 style="color: red" tt='toolname'></h1></router-link>
-    <a href="https://www.wikidata.org/wiki/Help:WikiVibes" style="color: red; margin-left: 0.5rem;">ⓘ</a>
+    <a :href="help_page()" style="color: red; margin-left: 0.5rem;">ⓘ</a>
     <div class="page-header-movies-total">
         {{entry_total}} <span tt="movies_total"></span>
         {{person_total}} <span tt="people_in"></span>
@@ -61,6 +61,9 @@ Vue.component ( 'page-header' , {
         } ,
         do_search : function () {
             this.$router.push ( '/search/'+this.search_query );
+        },
+        help_page: function () {
+            return config.misc.help_page;
         }
     } ,
 	template : '#page-header-template'
