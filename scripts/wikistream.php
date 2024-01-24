@@ -367,11 +367,11 @@ class WikiStream {
 		$out = [ 'status'=>'OK' ];
 		$out['sections'] = [];
 		$out['sections'][] = [
-			'title' => "Recently added",
+			'title_key' => "recently_edited",
 			'entries' => $this->get_recently_added(25)
 		];
 		$out['sections'][] = [
-			'title' => "Highly ranked",
+			'title_key' => "highly_ranked",
 			'entries' => $this->get_ranked_items(25)
 		];
 		$this->config->add_special_sections($this,$out);

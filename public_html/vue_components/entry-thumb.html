@@ -1,5 +1,71 @@
 <style>
-div.entry-container {
+
+.entry-container {
+    width: initial !important; /*reset*/
+    height: initial !important; /*reset*/
+    max-width: initial !important; /*reset*/
+    min-width: initial !important; /*reset*/
+    margin-right: initial !important; /*reset*/
+}
+
+.entry-container .thumbnail-container:hover {
+  opacity: 1 !important;
+}
+
+.entry-container .thumbnail-container {
+    height: initial !important; /*reset*/
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+}
+    
+.entry-container .thumbnail-container a {
+    overflow: hidden;
+    width: 200px;
+    aspect-ratio: 4/3;
+    height: auto;
+    border-radius: 20px;
+}
+
+.entry-container .thumbnail-container .wiki_thumbnail {
+    object-fit: cover;
+    transition: transform .75s, filter .5s;
+    height: 100%;
+    width: 100%;
+}
+
+.entry-container .thumbnail-container a:hover .wiki_thumbnail,
+.entry-container .thumbnail-container a:focus-visible .wiki_thumbnail {
+    transform: scale(1.05);
+    filter: brightness(1.2);
+}
+
+.entry-container .thumbnail-container .legend {
+    position: initial; /*reset*/
+    left: initial; /*reset*/
+    right: initial; /*reset*/
+    bottom: initial; /*reset*/
+    background-color: initial; /*reset*/
+    opacity: .6;
+    color: white;
+    transition: opacity .25s;
+}
+    
+.entry-container .thumbnail-container .legend div {
+    opacity: .6;
+}
+
+    
+.entry-container .thumbnail-container:hover .legend {
+    opacity: .6 !important; /*reset*/
+}
+    
+.entry-container .thumbnail-container a:hover + .legend,
+.entry-container .thumbnail-container a:focus-visible + .legend {
+    opacity: 1 !important;
+}
+
+/*div.entry-container {
     width:220px;
     height:200px;
     max-width:220px;
@@ -27,7 +93,7 @@ div.entry-container {
 }
 .entry-container div.thumbnail-container:hover {
     opacity: 0.5;
-}
+}*/
 </style>
 
 <template id='entry-thumb-template'>
@@ -35,6 +101,7 @@ div.entry-container {
     <div class='thumbnail-container'>
         <router-link :to="'/entry/'+entry.q">
             <commons-thumbnail v-if='entry.image!=null' loading="lazy" :filename='entry.image' videothumbnail='1' width='200' nolink='1'></commons-thumbnail>
+            <commons-thumbnail v-else-if='first_commons_video()!=""' loading="lazy" :filename='first_commons_video()' videothumbnail='1' width='200' nolink='1'></commons-thumbnail>
             <commons-thumbnail v-else :filename='missing_icon()' loading="lazy" width='200' nolink='1'></commons-thumbnail>
         </router-link>
         <div class="legend">
@@ -56,7 +123,14 @@ Vue.component ( 'entry-thumb' , {
     updated : function () { tt.updateInterface(this.$el) ; } ,
     mounted : function () { tt.updateInterface(this.$el) ; } ,
     methods : {
-        missing_icon: function () { return config.misc.missing_icon; }
+        missing_icon: function () { return config.misc.missing_icon; },
+        first_commons_video: function () {
+            let ret = '';
+            this.entry.files.forEach(function(v){
+                if ( ret=='' && v.property==10 ) ret = v.key;
+            });
+            return ret;
+        }
     } ,
 	template : '#entry-thumb-template'
 } ) ;

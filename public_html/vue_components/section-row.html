@@ -37,7 +37,8 @@ div.section-multi-row div.entry-container {
 <template id='section-row-template'>
 <div class='section'>
     <h3 v-if="typeof section!='undefined'" class="text-capitalize">
-        <span v-if="nolink || typeof section.q=='undefined'">{{section.title}}</span>
+        <span v-if="typeof section.title_key!='undefined'" :tt='section.title_key'></span>
+        <span v-else-if="nolink || typeof section.q=='undefined'">{{section.title}}</span>
         <router-link v-else-if="typeof section.prop=='undefined'" :to="'/section/'+section.q">{{section.title}}</router-link>
         <router-link v-else :to="'/section/'+section.q+'/'+(section.prop||'')">{{section.title}}</router-link>
         <span v-if="nolink" class="section-total-plain">{{section.total}}</span>
