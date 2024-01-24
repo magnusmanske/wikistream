@@ -93,13 +93,14 @@ class WikiStream {
 		$existing_qs = $this->get_items_in_db();
 
 		# All entries with a file on Commons
-		$sparql = $this->config->sparql;
-		foreach ( $this->tfc->getSPARQL_TSV($sparql) AS $row ) {
-			$row = (object) $row;
-			$q = $this->tfc->parseItemFromURL($row->q);
-			if ( isset($existing_qs[$q]) ) continue;
-			$q_numeric = preg_replace('|\D|','',$q)*1 ;
-			$new_qs[] = $q_numeric;
+		foreach ( $this->config->sparql AS $sparql ) {
+			foreach ( $this->tfc->getSPARQL_TSV($sparql) AS $row ) {
+				$row = (object) $row;
+				$q = $this->tfc->parseItemFromURL($row->q);
+				if ( isset($existing_qs[$q]) ) continue;
+				$q_numeric = preg_replace('|\D|','',$q)*1 ;
+				$new_qs[] = $q_numeric;
+			}
 		}
 
 		if ( count($new_qs)==0 ) return ; # Nothing new on the western front
@@ -280,10 +281,11 @@ class WikiStream {
 		return $this->get_item_view('vw_ranked_entries',$num,$section_q);
 	}
 
-	public function get_item_view($view_name,$num=25,$section_q=null) {
+	public function get_item_view($view_name,$num=25,$section_q=null,$subquery=null) {
 		$ret = [];
-		$sql = "SELECT * FROM `{$view_name}`";
-		if ( isset($section_q) and $section_q!=null ) $sql .= " WHERE `q` IN (SELECT item_q FROM section WHERE section_q={$section_q})";
+		$sql = "SELECT * FROM `{$view_name}` WHERE 1=1";
+		if ( isset($section_q) and $section_q!=null ) $sql .= " AND `q` IN (SELECT item_q FROM section WHERE section_q={$section_q})";
+		if ( $subquery!=null ) $sql .= " AND q IN ({$subquery})" ;
 		// $sql .= " ORDER BY sites DESC,minutes DESC,q" ;
 		$sql .= " LIMIT {$num}" ;
 		$result = $this->tfc->getSQL ( $this->db , $sql ) ;
@@ -519,7 +521,7 @@ class WikiStream {
 		$this->tfc->getSQL ( $this->db , $sql ) ;
 		$sql = "TRUNCATE `file`" ;
 		$this->tfc->getSQL ( $this->db , $sql ) ;
-		$sql = "UPDATE `item` SET `available`=0" ;
+		$sql = "DELETE FROM `item`" ;
 		$this->tfc->getSQL ( $this->db , $sql ) ;
 	}
 
