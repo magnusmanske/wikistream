@@ -45,7 +45,7 @@ var wikipediaDescriptionMixin = {
 $(document).ready ( function () {
     vue_components.toolname = config.misc.toolname ;
     Promise.all ( [
-        vue_components.loadComponents ( ['wd-date','wd-link','tool-translate','tool-navbar','commons-thumbnail','widar','autodesc','typeahead-search','value-validator',
+        vue_components.loadComponents ( ['wd-date','wd-link','tool-translate','tool-navbar','commons-thumbnail','widar','autodesc','typeahead-search','value-validator','mastodon-button',
             'vue_components/entry-thumb.html',
             'vue_components/person-thumb.html',
             'vue_components/section-row.html',

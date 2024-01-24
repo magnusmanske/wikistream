@@ -64,6 +64,9 @@ span.fluc span.wd-link-as-text:first-letter {
                     <div v-if='description!=""' class="entry-description">
                         {{description}}
                     </div>
+                    <div> <!-- Social -->
+                        <mastodon-button :message="social('message')" :target="social('url')"></mastodon-button>
+                    </div>
                 </div>
             </div>
             <div v-if='cast.length>0' style="clear:both; margin-bottom: 0.5rem; margin-top: 0.5rem; width: 100%;">
@@ -106,12 +109,22 @@ let EntryPage = Vue.extend ( {
             });
         })
     } ,
-    updated : function () { tt.updateInterface(this.$el) ; } ,
-    mounted : function () { tt.updateInterface(this.$el) ; } ,
+    updated : function () {
+        tt.updateInterface(this.$el) ;
+    } ,
+    mounted : function () {
+        tt.updateInterface(this.$el) ;
+    } ,
     methods : {
         associated_people_props: function () {
             return config.misc.associated_people_props;
         } ,
+        social: function ( key ) {
+            let label = this.item.getFirstStringForProperty("P154");
+            if ( label=='' ) label = this.item.getLabel();
+            if ( key=='message' ) return tt.t("mastodon_message").replace(/\$1/,label);
+            if ( key=='url' ) return 'https://'+window.location.host+'/#/entry/'+this.q;
+        },
         add_cast: function () {
             let self = this ;
             let performer_prop = config.misc.performer_prop;
