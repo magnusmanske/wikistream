@@ -38,6 +38,11 @@ span.fluc span.wd-link-as-text:first-letter {
                         </div>
                     </div>
                     <div style="margin-bottom: 0.5rem;">
+                        <span v-for="tag in tags" :class="'badge badge-pill  badge-'+tag.level" style="margin-right: 0.5rem;">
+                            <wd-link :item='tag.q' as_text='1'></wd-link>
+                        </span>
+                    </div>
+                    <div style="margin-bottom: 0.5rem;">
                         {{entry.minutes}} min
                     </div>
                     <div style="display:flex; margin-bottom: 0.5rem;">
@@ -90,7 +95,12 @@ span.fluc span.wd-link-as-text:first-letter {
 let EntryPage = Vue.extend ( {
     props : ['q'] ,
     mixins : [wikipediaDescriptionMixin],
-    data : function () { return { loading:true,item:{},entry:{},cast:[],description:'' } } ,
+    data : function () { return { loading:true,item:{},entry:{},cast:[],tags:[],description:'',
+        tag_levels:{
+            danger:['Q698752','Q47131','Q8463'],
+            warning:['Q3587621','Q880808'],
+        }
+     } } ,
     created : function () {
         let self = this;
         let entry_q = 'Q'+self.q;
@@ -104,6 +114,7 @@ let EntryPage = Vue.extend ( {
                         if ( typeof desc!='undefined' && desc!='' ) self.description = desc;
                     });
                     self.add_cast();
+                    self.add_tags();
                     self.loading = false;
                 })
             });
@@ -124,6 +135,17 @@ let EntryPage = Vue.extend ( {
             if ( label=='' ) label = this.item.getLabel();
             if ( key=='message' ) return tt.t("mastodon_message").replace(/\$1/,label);
             if ( key=='url' ) return 'https://'+window.location.host+'/#/entry/'+this.q;
+        },
+        add_tags: function () {
+            let self = this ;
+            self.item.getClaimsForProperty("P180").forEach( (c) => {
+                let tag = { level:'light' };
+                tag.q = self.item.getClaimTargetItemID(c);
+                for (const [level, items] of Object.entries(self.tag_levels)) {
+                    if ( items.includes(tag.q) ) tag.level = level;
+                };
+                self.tags.push(tag);
+            });
         },
         add_cast: function () {
             let self = this ;
