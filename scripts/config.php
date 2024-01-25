@@ -19,7 +19,7 @@ class WikiStreamConfig {
 class WikiStreamConfigWikiFlix extends WikiStreamConfig {
 	public $toolkey = "wikiflix";
 	public $tool_db = 'wikiflix_p';
-	public $whitelist_page = 'Help:WikiFlix/Movie whitelist';
+	public $whitelist_page = '';
 	public $sparql =  [
 		"SELECT ?q ?hasMedia {
 			?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P6216 wd:Q19652 .
