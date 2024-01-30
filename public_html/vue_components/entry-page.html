@@ -146,6 +146,17 @@ let EntryPage = Vue.extend ( {
                 };
                 self.tags.push(tag);
             });
+            self.item.getClaimsForProperty("P5021").forEach( (c) => {
+                if ( self.item.getClaimTargetItemID(c)=='Q4165246' ) {
+                    if ( typeof c.qualifiers.P9259!='undefined' ) {
+                        c.qualifiers.P9259.forEach((qual) => {
+                            if ( qual.datavalue.value.id=="Q105773168" ) self.tags.push({ level:'success' , q:'Q4165246' });
+                            if ( qual.datavalue.value.id=="Q105773155" ) self.tags.push({ level:'danger' , q:'Q4165246' });
+                            if ( qual.datavalue.value.id=="Q105729336" ) self.tags.push({ level:'light' , q:'Q4165246' });
+                        })
+                    }
+                }
+            } ) ;
         },
         add_cast: function () {
             let self = this ;
