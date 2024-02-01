@@ -31,13 +31,17 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig {
 			BIND(BOUND(?ia)||BOUND(?commons)||BOUND(?youtube)||BOUND(?vimeo) as ?hasMedia)
 			FILTER(?hasMedia=true)
 		}",
-		"SELECT ?q ?commons {
+		"SELECT ?q {
 			?q (wdt:P31/(wdt:P279*)) wd:Q11424 . # A movie
 			?q p:P10 ?statement . # Commons video
 			?statement ps:P10 ?commons . # The video ID (not used here)
 			?statement pq:P3831 wd:Q89347362 # full video
 			MINUS {?q wdt:P6216 wd:Q19652 } # but don't bother with the public domain ones
 		}",
+		// "SELECT ?q {
+		// 	?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P724 ?ia . # A film with an Internet Archive value
+		// 	MINUS {?q wdt:P6216 wd:Q19652 } # but don't bother with the public domain ones
+		// }",
 	];
 	public $people_props = [161,57];
 	public $misc_section_props = [31,166,136,462,495,364,361];

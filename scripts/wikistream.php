@@ -516,12 +516,19 @@ class WikiStream {
 		$this->tfc->getSQL ( $this->db , $sql ) ;
 	}
 
-	public function reset_all () {
+	public function reset_all() {
 		$sql = "TRUNCATE `section`" ;
 		$this->tfc->getSQL ( $this->db , $sql ) ;
 		$sql = "TRUNCATE `file`" ;
 		$this->tfc->getSQL ( $this->db , $sql ) ;
 		$sql = "DELETE FROM `item`" ;
+		$this->tfc->getSQL ( $this->db , $sql ) ;
+	}
+
+	public function purge_items_without_files() {
+		$sql = "DELETE from section where item_q NOT IN (select item_q FROM `file`)";
+		$this->tfc->getSQL ( $this->db , $sql ) ;
+		$sql = "DELETE from item where q NOT IN (select item_q FROM `file`)";
 		$this->tfc->getSQL ( $this->db , $sql ) ;
 	}
 
