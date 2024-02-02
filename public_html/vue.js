@@ -45,7 +45,7 @@ var wikipediaDescriptionMixin = {
 $(document).ready ( function () {
     vue_components.toolname = config.misc.toolname ;
     Promise.all ( [
-        vue_components.loadComponents ( ['wd-date','wd-link','tool-translate','tool-navbar','commons-thumbnail','widar','autodesc','typeahead-search','value-validator','mastodon-button',
+        vue_components.loadComponents ( ['wd-date','wd-link','tool-translate','tool-navbar','commons-thumbnail','widar','autodesc','typeahead-search','value-validator','mastodon-button','batch-navigator',
             'vue_components/entry-thumb.html',
             'vue_components/person-thumb.html',
             'vue_components/section-row.html',
@@ -57,6 +57,7 @@ $(document).ready ( function () {
             'vue_components/sections-page.html',
             'vue_components/search-page.html',
             'vue_components/person-page.html',
+            'vue_components/candidates-page.html',
             ] )
     ] )
     .then ( () => {
@@ -71,6 +72,8 @@ $(document).ready ( function () {
             { path: '/section/:section_q', component: SectionPage , props:true },
             { path: '/section/:section_q/:setion_prop', component: SectionPage , props:true },
             { path: '/person/:q', component: PersonPage , props:true },
+            { path: '/candidates', component: CandidatesPage , props:true },
+            { path: '/candidates/:offset', component: CandidatesPage , props:true },
         ] ;
         router = new VueRouter({routes}) ;
         app = new Vue ( { router } ) .$mount('#app') ;

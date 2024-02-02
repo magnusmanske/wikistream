@@ -26,17 +26,24 @@ if ( isset($argv[1]) and $argv[1]=='json' ) {
 	$ws->purge_items_without_files();
 } else if ( isset($argv[1]) and $argv[1]=='annotate_ia_movies' ) {
 	$ws->annotate_ia_movies();
-// } else if ( isset($argv[1]) and $argv[1]=='whitelist' ) {
-// 	$ws->import_movie_whitelist();
+} else if ( isset($argv[1]) and $argv[1]=='update_item_no_files' ) {
+	$ws->update_item_no_files();
+	$ws->update_item_no_files_search_results();
 } else {
 	$ws->update_from_sparql();
 	$ws->make_rc_unavailable();
-	// $ws->import_item_whitelist();
 	$ws->add_missing_item_details();	
 	$ws->purge_items_without_files();
 	$ws->update_persons();
 	$ws->import_missing_section_labels();
 	$ws->generate_main_page_data();
+
+	# These edits will take too long to percolate into SPARQL to be useful now, so prepare for the next update
+	$ws->annotate_ia_movies();
+
+	# Update candidate items with no files
+	$ws->update_item_no_files();
+	// $ws->update_item_no_files_search_results(); // TODO uncomment when first run is complete
 }
 
 ?>

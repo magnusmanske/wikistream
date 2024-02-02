@@ -41,6 +41,11 @@ if ( $action=='get_entry' ) {
 } else if ( $action=='get_person' ) {
 	$q = $ws->tfc->getRequest('q',0)*1;
 	$out['data'] = $ws->getPerson($q);
+} else if ( $action=='get_candidate_items' ) {
+	$limit = $ws->tfc->getRequest('limit','50')*1;
+	$offset = $ws->tfc->getRequest('offset','0')*1;
+	$out['data'] = $ws->get_candidate_items($limit,$offset);
+	$out['total_candidates'] = $ws->get_total_candidate_items();
 } else {
 	$out['status'] = "Bad action: {$action}";
 }

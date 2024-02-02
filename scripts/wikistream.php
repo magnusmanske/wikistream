@@ -164,6 +164,7 @@ class WikiStream {
 		}
 
 		$image = $item->getFirstString('P18');
+		if ( $image=='' ) $image = $item->getFirstString('P154');
 		if ( $image=='' ) $image_safe = 'null';
 		else $image_safe = '"'.$this->db->real_escape_string($image).'"';
 
@@ -544,12 +545,13 @@ class WikiStream {
 			if ( preg_match('|^(\d+)[,:](\d+)[:\'](\d+)$|',$s,$m) ) $seconds = ($m[1]*60+$m[2])*60+$m[3];
 			else if ( preg_match('|^(\d+):(\d+)$|',$s,$m) ) $seconds = $m[1]*60+$m[2];
 			else if ( preg_match('|^(\d+),(\d+)’$|',$s,$m) ) $seconds = ($m[1]*60+$m[2])*60;
-			else if ( preg_match('|^(\d+[.0-9]*)$|',$s,$m) ) $seconds = round($s*1);
-			else if ( preg_match('|(\d+) *min (\d+) *sec|',$s,$m) ) $seconds = round($m[1]*60+$m[2]*1);
-			else if ( preg_match('|(\d+) *h (\d+) *m|',$s,$m) ) $seconds = round(($m[1]*60+$m[2]*1)*60);
-			else if ( preg_match('/(\d+[.0-9]*) *(min|minute|minutes|min\.)/i',$s,$m) ) $seconds = round($m[1]*60);
+			else if ( preg_match('|^(\d+[.0-9]*)$|',$s,$m) ) $seconds = $s*1;
+			else if ( preg_match('|(\d+) *min (\d+) *sec|',$s,$m) ) $seconds = $m[1]*60+$m[2]*1;
+			else if ( preg_match('|(\d+) *h (\d+) *m|',$s,$m) ) $seconds = ($m[1]*60+$m[2]*1)*60;
+			else if ( preg_match('/(\d+[.0-9]*) *(min|minute|minutes|min\.)/i',$s,$m) ) $seconds = $m[1]*60;
 			else error_log("Length: {$s}");
-			return $seconds;
+			if ( $seconds < 120 ) $seconds = 0 ; // Filter out some faulty parsing
+			return round($seconds);
 		}
 
 		$sparql = "SELECT ?q ?ia {
@@ -567,7 +569,7 @@ class WikiStream {
 
 		$userAgent = 'Mozilla/5.0 (Windows NT 5.1; rv:31.0) Gecko/20100101 Firefox/31.0';
 
-		$qs = [];
+		$qs_commands = [];
 
 		$wil = new WikidataItemList();
 		$wil->loadItems(array_keys($q2ia));
@@ -590,18 +592,13 @@ class WikiStream {
 
 			$url = "https://archive.org/metadata/{$ia}";
 			// print "{$url}\n" ;
-			$ch = curl_init();
-			curl_setopt($ch, CURLOPT_URL,$url);
-			curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
-			curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-			curl_setopt( $ch, CURLOPT_USERAGENT, $userAgent );
-			$j = json_decode(curl_exec($ch));
 
+			$j = $this->get_json_from_url($url);
 			if ( isset($j->is_dark) and $j->is_dark ) {
 				// print "{$ia} is removed\n";
 				$cmd = "-{$q}\tP724\t\"{$ia}\"\t/* File was removed from Internet Archive */";
 				// print "{$cmd}\n";
-				$qs[] = $cmd;
+				$qs_commands[] = $cmd;
 				continue;
 			}
 
@@ -623,7 +620,7 @@ class WikiStream {
 			if ( isset($minutes) ) {
 				$cmd = "{$q}\tP724\t\"{$ia}\"\tP2047\t{$minutes}~1U7727\t/* Imported from Internet Archive */";
 				// print "{$cmd}\n";
-				$qs[] = $cmd;
+				$qs_commands[] = $cmd;
 			} else {
 				// print "No runtime in IA for {$q} / {$ia}\n";
 			}
@@ -631,10 +628,129 @@ class WikiStream {
 
 		}
 
-		print join("\n",$qs)."\n";
+		if ( count($qs_commands)>0 ) {
+			require_once ( '/data/project/quickstatements/public_html/quickstatements.php' ) ;
+			// print join("\n",$qs_commands)."\n";
+			print "Running ".count($qs_commands)." QS commands\n";
+			$qs = $this->tfc->getQS('wikiflix',__DIR__.'/../bot.ini');
+			$this->tfc->runCommandsQS($qs_commands,$qs);
+		}
+	}
+
+	public function update_item_no_files() {
+		# Remove items where there is already one with a file
+		$sql = "DELETE FROM `item_no_files` WHERE q IN (SELECT DISTINCT `item_q` FROM `file`)" ;
+		$this->tfc->getSQL ( $this->db , $sql ) ;
+
+		# Get existing QIDs
+		$existing_qs = [];
+		$sql = "SELECT `q` FROM `item_no_files`" ;
+		$result = $this->tfc->getSQL ( $this->db , $sql ) ;
+		while($o = $result->fetch_object()) $existing_qs["Q{$o->q}"] = $o->q ;
+
+		# Get all candidate items
+		$sparql = "SELECT DISTINCT ?q ?qLabel (year(?date) AS ?year) ?duration ?sitelinks {
+					  ?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P6216 wd:Q19652 ; wikibase:sitelinks ?sitelinks .
+					  MINUS { ?q wdt:P31 wd:Q97570383 } # Glass positive
+					  OPTIONAL { ?q wdt:P724 ?ia }
+					  OPTIONAL { ?q wdt:P10 ?commons }
+					  OPTIONAL { ?q wdt:P1651 ?youtube }
+					  OPTIONAL { ?q wdt:P4015 ?vimeo }
+					  BIND(BOUND(?ia)||BOUND(?commons)||BOUND(?youtube)||BOUND(?vimeo) as ?hasMedia)
+					  FILTER(?hasMedia=false)
+					  OPTIONAL { ?q wdt:P577 ?date }
+					  OPTIONAL { ?q wdt:P2047 ?duration }
+					SERVICE wikibase:label { bd:serviceParam wikibase:language \"[AUTO_LANGUAGE],en,fr,it,de\". }
+		}";
+		$to_insert = [];
+		foreach ( $this->tfc->getSPARQL_TSV($sparql) AS $row ) {
+			$row = (object) $row;
+			$q = $this->tfc->parseItemFromURL($row->q);
+			if ( isset($existing_qs[$q]) ) continue;
+			$q_numeric = preg_replace('|\D|','',$q)*1 ;
+			$existing_qs[$q] = $q_numeric;
+			$i = [
+				$q_numeric, # Safe
+				'"'.$this->db->real_escape_string($row->qLabel).'"', # Safe
+				($row->year==''?'null':$row->year*1), # Safe
+				($row->duration==''?'null':$row->duration*1), # Safe
+				$row->sitelinks*1, # Safe
+			];
+			$to_insert[] = '('.implode(',',$i).')';
+		}
+
+		# Insert new items into database
+		if ( count($to_insert)>0 ) {
+			$sql = "INSERT IGNORE INTO `item_no_files` (`q`,`title`,`year`,`minutes`,`sites`) VALUES " . implode(',',$to_insert);
+			$this->tfc->getSQL ( $this->db , $sql ) ;
+		}
+	}
+
+	function get_json_from_url($url) {
+		$userAgent = 'Mozilla/5.0 (Windows NT 5.1; rv:31.0) Gecko/20100101 Firefox/31.0';
+		$ch = curl_init();
+		curl_setopt($ch, CURLOPT_URL,$url);
+		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+		curl_setopt( $ch, CURLOPT_USERAGENT, $userAgent );
+		$j = json_decode(curl_exec($ch));
+		return $j;
+	}
+
+	public function update_item_no_files_search_results() {
+		$userAgent = 'Mozilla/5.0 (Windows NT 5.1; rv:31.0) Gecko/20100101 Firefox/31.0';
+
+		# Internet Archive 
+		if ( true ) {
+			$sql = "SELECT * FROM `item_no_files` WHERE `ia_results` IS NULL";
+			$result = $this->tfc->getSQL ( $this->db , $sql ) ;
+			while($o = $result->fetch_object()) {
+				$query = $o->title;
+				if ( isset($o->year) ) $query .= " {$o->year}";
+				$url = "https://archive.org/services/search/beta/page_production/?service_backend=metadata&user_query=".urlencode($query)."&page_type=collection_details&page_target=movies&hits_per_page=50&page=0";
+				$j = $this->get_json_from_url($url);
+				$hits = $j->response->body->hits->total*1;
+				$sql = "UPDATE `item_no_files` SET `ia_results`={$hits} WHERE `q`={$o->q}";
+				$this->tfc->getSQL ( $this->db , $sql ) ;
+				sleep(2);
+			}
+		}
+
+		# Commons TODO
+		if ( true ) {
+			$sql = "SELECT * FROM `item_no_files` WHERE `commons_results` IS NULL";
+			$result = $this->tfc->getSQL ( $this->db , $sql ) ;
+			while($o = $result->fetch_object()) {
+				$query = "filetype:video \"{$o->title}\"";
+				if ( isset($o->year) ) $query .= " {$o->year}";
+				$url = "https://commons.wikimedia.org/w/api.php?action=query&list=search&srnamespace=6&format=json&srsearch=".urlencode($query);
+				$j = $this->get_json_from_url($url);
+				$hits = count($j->query->search);
+				$sql = "UPDATE `item_no_files` SET `commons_results`={$hits} WHERE `q`={$o->q}";
+				$this->tfc->getSQL ( $this->db , $sql ) ;
+				// print "{$sql}\n" ;
+			}
+		}
 
 	}
 
+	public function get_candidate_items($limit, $offset) {
+		$ret = [];
+		$limit *= 1 ;
+		$offset *= 1 ;
+		$sql = "SELECT * FROM `item_no_files` WHERE `ia_results` IS NOT null AND `commons_results` is not null ORDER BY `sites` DESC LIMIT {$limit} OFFSET {$offset}";
+		$result = $this->tfc->getSQL ( $this->db , $sql ) ;
+		while($o = $result->fetch_object()) $ret[] = $o ;
+		return $ret ;
+	}
+
+	public function get_total_candidate_items() {
+		$ret = 0;
+		$sql = "SELECT count(*) AS total FROM `item_no_files`";
+		$result = $this->tfc->getSQL ( $this->db , $sql ) ;
+		if($o = $result->fetch_object()) $ret = $o->total;
+		return $ret;
+	}
 }
 
 

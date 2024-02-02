@@ -1,0 +1,107 @@
+<template id='candidates-page-template'>
+<div class='container-fluid'>
+    <page-header></page-header>
+    <div class="row" style="width:100%;">
+        <div v-if='loading'>
+            <i tt='loading'></i>
+        </div>
+        <div v-else>
+            <div style="width: 100%;">
+                <div style="display: flex;">
+                    <div style="flex-grow: 1;"></div>
+                        <div class="lead" tt="candidates_lead" style="width: 50%; margin-bottom: 1rem;"></div>
+                    <div style="flex-grow: 1;"></div>
+                </div>
+                <div style="display: flex;">
+                    <div style="flex-grow: 1;"></div>
+                    <batch-navigator batch_size='50' :total="total_candidates" :current="(offset||0)/50" @set-current="set_current($event)"></batch-navigator>
+                    <div style="flex-grow: 1;"></div>
+                </div>
+                <div style="display: flex;">
+                    <div style="flex-grow: 1;"></div>
+                    <table class="table table-striped" style="width: 50%;">
+                        <thead>
+                            <tr>
+                                <th tt="entry"></th>
+                                <th tt="year"></th>
+                                <th tt="minutes"></th>
+                                <th tt="sites"></th>
+                                <th tt="internet_archive_search"></th>
+                                <th tt="commons_search"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="c in candidates">
+                                <td>
+                                    <wd-link :item="'Q'+c.q" :id='"candidate_item_"+c.q'></wd-link>
+                                </td>
+                                <td>
+                                    {{c.year}}
+                                </td>
+                                <td>
+                                    {{c.minutes}}
+                                </td>
+                                <td>
+                                    {{c.sites}}
+                                </td>
+                                <td nowrap>
+                                    <a class='btn btn-outline-primary' :href='"https://archive.org/details/movies?query="+getLabelYear(c)' target='_blank' tt="search"></a>
+                                    <span v-if='typeof c.ia_results=="undefined"'>?</span>
+                                    <span v-else-if='c.ia_results==0' style="color:red;" tt_title="has_no_search_results">&times;</span>
+                                    <span v-else style="color: green;" tt_title="has_search_results">✓</span>
+                                </td>
+                                <td nowrap>
+                                    <a class='btn btn-outline-primary' :href='"https://commons.wikimedia.org/w/index.php?type=video&title=Special:MediaSearch&go=Go&search="+getLabelYear(c)' target='_blank' tt="search"></a>
+                                    <span v-if='typeof c.commons_results=="undefined"'>?</span>
+                                    <span v-else-if='c.commons_results==0' style="color:red;" tt_title="has_no_search_results">&times;</span>
+                                    <span v-else style="color: green;" tt_title="has_search_results">✓</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <div style="flex-grow: 1;"></div>
+                </div>
+                <div style="display: flex;">
+                    <div style="flex-grow: 1;"></div>
+                    <batch-navigator batch_size='50' :total="total_candidates" :current="(offset||0)/50" @set-current="set_current($event)"></batch-navigator>
+                    <div style="flex-grow: 1;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+</template>
+
+<script>
+'use strict';
+
+let CandidatesPage = Vue.extend ( {
+    props : [,'offset'] ,
+    data : function () { return { loading:true,candidates:[],total_candidates:0 } } ,
+    created : function () {
+        let self = this;
+        fetch("./api.php?action=get_candidate_items&offset="+(self.offset||0))
+        .then(results => {
+            results.json().then( j => {
+                self.candidates=j.data;
+                self.total_candidates = j.total_candidates;
+                self.loading = false;
+            })
+        })
+    } ,
+    updated : function () { tt.updateInterface(this.$el) ; } ,
+    mounted : function () { tt.updateInterface(this.$el) ; } ,
+    methods : {
+        getLabelYear: function (c) {
+            let query = '"'+c.title+'"';
+            if ( typeof c.year!='undefined' && c.year!='' ) query += " "+c.year;
+            return encodeURIComponent(query);
+        },
+        set_current: function(new_batch) {
+            this.$router.push ( '/candidates/'+(new_batch*50) );
+        }
+    } ,
+    template:'#candidates-page-template'
+} ) ;
+</script>
