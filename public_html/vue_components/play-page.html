@@ -5,6 +5,7 @@
         <iframe v-if='source_prop==10||source_prop==51' :src="'https://commons.wikimedia.org/wiki/File:'+encodeURIComponent(source_key)+'?embedplayer=yes'" width="100%" height="100%" frameborder="0" allow="autoplay" webkitallowfullscreen="true" mozallowfullscreen="true" allowfullscreen></iframe>
         <iframe v-else-if='source_prop==724' :src="'https://archive.org/embed/'+encodeURIComponent(source_key)" width="100%" height="100%" frameborder="0" allow="autoplay" webkitallowfullscreen="true" mozallowfullscreen="true" allowfullscreen></iframe>
         <iframe v-else-if='source_prop==1651' :src="'https://www.youtube-nocookie.com/embed/'+encodeURIComponent(source_key)" width="100%" height="100%" frameborder="0" allow="autoplay; encrypted-media" webkitallowfullscreen="true" mozallowfullscreen="true" allowfullscreen></iframe>
+        <iframe v-else-if='source_prop==4015' :src="'https://player.vimeo.com/video/'+encodeURIComponent(source_key)+'?autoplay=1&loop=1&autopause=0'" width="100%" height="100%" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>
         <div v-else tt='unknown_source'></div>
     </div>
 

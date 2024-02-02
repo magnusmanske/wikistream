@@ -93,18 +93,22 @@ class WikiStream {
 		$existing_qs = $this->get_items_in_db();
 
 		# All entries with a file on Commons
-		foreach ( $this->config->sparql AS $sparql ) {
+		foreach ( $this->config->sparql AS $sparql_id => $sparql ) {
+			$found = 0 ;
 			foreach ( $this->tfc->getSPARQL_TSV($sparql) AS $row ) {
 				$row = (object) $row;
 				$q = $this->tfc->parseItemFromURL($row->q);
 				if ( isset($existing_qs[$q]) ) continue;
 				$q_numeric = preg_replace('|\D|','',$q)*1 ;
 				$new_qs[] = $q_numeric;
+				$found += 1;
 			}
+			// print "SPARQL #{$sparql_id} found {$found} items\n";
 		}
 
 		if ( count($new_qs)==0 ) return ; # Nothing new on the western front
 		$new_qs = array_unique($new_qs);
+		print "Adding ".count($new_qs)." new items\n";
 		$sql = "INSERT IGNORE INTO `item` (`q`) VALUES (".implode("),(",$new_qs).")" ;
 		$this->tfc->getSQL ( $this->db , $sql ) ;
 	}
@@ -530,6 +534,105 @@ class WikiStream {
 		$this->tfc->getSQL ( $this->db , $sql ) ;
 		$sql = "DELETE from item where q NOT IN (select item_q FROM `file`)";
 		$this->tfc->getSQL ( $this->db , $sql ) ;
+	}
+
+	public function annotate_ia_movies() {
+		ini_set('memory_limit', '4G');
+
+		function parse_seconds($s) {
+			$seconds = 0;
+			if ( preg_match('|^(\d+)[,:](\d+)[:\'](\d+)$|',$s,$m) ) $seconds = ($m[1]*60+$m[2])*60+$m[3];
+			else if ( preg_match('|^(\d+):(\d+)$|',$s,$m) ) $seconds = $m[1]*60+$m[2];
+			else if ( preg_match('|^(\d+),(\d+)’$|',$s,$m) ) $seconds = ($m[1]*60+$m[2])*60;
+			else if ( preg_match('|^(\d+[.0-9]*)$|',$s,$m) ) $seconds = round($s*1);
+			else if ( preg_match('|(\d+) *min (\d+) *sec|',$s,$m) ) $seconds = round($m[1]*60+$m[2]*1);
+			else if ( preg_match('|(\d+) *h (\d+) *m|',$s,$m) ) $seconds = round(($m[1]*60+$m[2]*1)*60);
+			else if ( preg_match('/(\d+[.0-9]*) *(min|minute|minutes|min\.)/i',$s,$m) ) $seconds = round($m[1]*60);
+			else error_log("Length: {$s}");
+			return $seconds;
+		}
+
+		$sparql = "SELECT ?q ?ia {
+			?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P724 ?ia . # A film with an Internet Archive value
+			?q p:P724 ?statement .
+			?statement ps:P724 ?ia .
+			MINUS { ?statement pq:P2047 ?duration }
+		}"; # LIMIT 1000
+		$q2ia = [];
+		foreach ( $this->tfc->getSPARQL_TSV($sparql) AS $row ) {
+			$q = $this->tfc->parseItemFromURL($row['q']);
+			$ia = $row['ia'];
+			$q2ia[$q] = $ia;
+		}
+
+		$userAgent = 'Mozilla/5.0 (Windows NT 5.1; rv:31.0) Gecko/20100101 Firefox/31.0';
+
+		$qs = [];
+
+		$wil = new WikidataItemList();
+		$wil->loadItems(array_keys($q2ia));
+		foreach ( $q2ia AS $q => $ia ) {
+			$item = $wil->getItem($q);
+			if ( !isset($item) ) continue;
+			// print "Item {$q}\n" ;
+
+			$claims = $item->getClaims("P724");
+			unset($claim);
+			foreach ( $claims as $c ) {
+				if ( !isset($c->mainsnak) ) continue ; # Paranoia
+				if ( $c->mainsnak->datavalue->value==$ia ) $claim = $c ;
+			}
+			if ( !isset($claim) ) {
+				// print "Can not find claim for {$ia} in {$q}\n";
+				continue ;
+			}
+			// print "Statement {$claim->id}\n";
+
+			$url = "https://archive.org/metadata/{$ia}";
+			// print "{$url}\n" ;
+			$ch = curl_init();
+			curl_setopt($ch, CURLOPT_URL,$url);
+			curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
+			curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+			curl_setopt( $ch, CURLOPT_USERAGENT, $userAgent );
+			$j = json_decode(curl_exec($ch));
+
+			if ( isset($j->is_dark) and $j->is_dark ) {
+				// print "{$ia} is removed\n";
+				$cmd = "-{$q}\tP724\t\"{$ia}\"\t/* File was removed from Internet Archive */";
+				// print "{$cmd}\n";
+				$qs[] = $cmd;
+				continue;
+			}
+
+			unset($minutes);
+			if ( isset($j->metadata) and isset($j->metadata->runtime) ) {
+				$seconds = parse_seconds($j->metadata->runtime);
+				if ( $seconds>0 ) $minutes = round($seconds/60);
+			}
+			if ( !isset($minutes) and isset($j->files) ) {
+				foreach ( $j->files AS $file ) {
+					if ( !isset($file->length) ) continue;
+					$seconds = parse_seconds($file->length);
+					if ( $seconds==0 ) continue;
+					if ( !isset($minutes) ) $minutes = 0;
+					$minutes = max(round($seconds/60),$minutes);
+				}
+			}
+
+			if ( isset($minutes) ) {
+				$cmd = "{$q}\tP724\t\"{$ia}\"\tP2047\t{$minutes}~1U7727\t/* Imported from Internet Archive */";
+				// print "{$cmd}\n";
+				$qs[] = $cmd;
+			} else {
+				// print "No runtime in IA for {$q} / {$ia}\n";
+			}
+
+
+		}
+
+		print join("\n",$qs)."\n";
+
 	}
 
 }

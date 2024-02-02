@@ -24,14 +24,16 @@ if ( isset($argv[1]) and $argv[1]=='json' ) {
 	$ws->import_missing_section_labels();
 } else if ( isset($argv[1]) and $argv[1]=='purge_items_without_files' ) {
 	$ws->purge_items_without_files();
-} else if ( isset($argv[1]) and $argv[1]=='whitelist' ) {
-	$ws->import_movie_whitelist();
+} else if ( isset($argv[1]) and $argv[1]=='annotate_ia_movies' ) {
+	$ws->annotate_ia_movies();
+// } else if ( isset($argv[1]) and $argv[1]=='whitelist' ) {
+// 	$ws->import_movie_whitelist();
 } else {
 	$ws->update_from_sparql();
 	$ws->make_rc_unavailable();
-	$ws->import_item_whitelist();
-	$ws->purge_items_without_files();
+	// $ws->import_item_whitelist();
 	$ws->add_missing_item_details();	
+	$ws->purge_items_without_files();
 	$ws->update_persons();
 	$ws->import_missing_section_labels();
 	$ws->generate_main_page_data();

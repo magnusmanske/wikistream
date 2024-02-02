@@ -38,10 +38,16 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig {
 			?statement pq:P3831 wd:Q89347362 # full video
 			MINUS {?q wdt:P6216 wd:Q19652 } # but don't bother with the public domain ones
 		}",
-		// "SELECT ?q {
-		// 	?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P724 ?ia . # A film with an Internet Archive value
-		// 	MINUS {?q wdt:P6216 wd:Q19652 } # but don't bother with the public domain ones
-		// }",
+		"SELECT ?q {
+			?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P724 ?ia . # A film with an Internet Archive value
+			?q wdt:P2047 ?duration . # with a duration
+			?q p:P724 ?statement . # with an Internet Archive ID
+			?statement ps:P724 ?ia .
+			?statement pq:P2047 ?ia_duration . # that also has a duration
+			BIND(ABS(?ia_duration/?duration*100) AS ?percent)
+			FILTER(?percent>=60 && ?percent<=150) # that is similar to the item duration
+		}",
+
 	];
 	public $people_props = [161,57];
 	public $misc_section_props = [31,166,136,462,495,364,361];
