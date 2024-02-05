@@ -19,7 +19,8 @@ class WikiStreamConfig {
 class WikiStreamConfigWikiFlix extends WikiStreamConfig {
 	public $toolkey = "wikiflix";
 	public $tool_db = 'wikiflix_p';
-	public $whitelist_page = '';
+	public $whitelist_page = ''; # 'Help:WikiFlix/Movie whitelist';
+	public $blacklist_page = ''; # 'Help:WikiFlix/Movie blacklist';
 	public $sparql =  [
 		"SELECT ?q ?hasMedia {
 			?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P6216 wd:Q19652 .
@@ -81,6 +82,7 @@ class WikiStreamConfigWikiVibes extends WikiStreamConfig {
 	public $toolkey = "wikivibes";
 	public $tool_db = 'vibes_p';
 	public $whitelist_page = ''; # 'Help:WikiVibes/audio whitelist';
+	public $blacklist_page = '';
 	public $sparql = [
 		"SELECT ?q ?file { ?q wdt:P51 ?file ; wdt:P31/wdt:P279* wd:Q2188189 }",
 	];

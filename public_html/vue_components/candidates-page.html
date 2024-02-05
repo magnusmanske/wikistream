@@ -28,6 +28,7 @@
                                 <th tt="sites"></th>
                                 <th tt="internet_archive_search"></th>
                                 <th tt="commons_search"></th>
+                                <th tt="youtube_search"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -55,6 +56,9 @@
                                     <span v-if='typeof c.commons_results=="undefined"'>?</span>
                                     <span v-else-if='c.commons_results==0' style="color:red;" tt_title="has_no_search_results">&times;</span>
                                     <span v-else style="color: green;" tt_title="has_search_results">✓</span>
+                                </td>
+                                <td nowrap>
+                                    <a class='btn btn-outline-primary' :href='"https://www.youtube.com/results?search_query="+getLabelYear(c)' target='_blank' tt="search"></a>
                                 </td>
                             </tr>
                         </tbody>

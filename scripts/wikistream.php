@@ -283,7 +283,7 @@ class WikiStream {
 	}
 
 	public function get_ranked_items($num=25,$section_q=null) {
-		return $this->get_item_view('vw_ranked_entries',$num,$section_q);
+		return $this->get_item_view('vw_ranked_entries_blacklist',$num,$section_q);
 	}
 
 	public function get_item_view($view_name,$num=25,$section_q=null,$subquery=null) {
@@ -518,6 +518,29 @@ class WikiStream {
 		}
 		if ( count($qs)==0 ) return;
 		$sql = "INSERT IGNORE INTO `item` (`q`) VALUES (".implode('),(',$qs).")" ;
+		$this->tfc->getSQL ( $this->db , $sql ) ;
+	}
+
+	public function import_item_blacklist() {
+		if ( $this->config->blacklist_page=='' ) return;
+
+		# Get item list from blacklist page
+		$qs = [];
+		$wt = $this->tfc->getWikiPageText('wikidatawiki',$this->config->blacklist_page);
+		$rows = explode("\n",$wt);
+		foreach ( $rows AS $row ) {
+			if ( !preg_match('|^\*.*?(\d{3,})|',$row,$m) ) continue;
+			$q = $m[1]*1;
+			$qs[] = $q ;
+		}
+
+		# Delete old blacklist
+		$sql = "TRUNCATE `blacklist`";
+		$this->tfc->getSQL ( $this->db , $sql ) ;
+		if ( count($qs)==0 ) return;
+
+		# Create new blacklist
+		$sql = "INSERT IGNORE INTO `blacklist` (`q`) VALUES (".implode('),(',$qs).")" ;
 		$this->tfc->getSQL ( $this->db , $sql ) ;
 	}
 

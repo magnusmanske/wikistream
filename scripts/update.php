@@ -31,6 +31,8 @@ if ( isset($argv[1]) and $argv[1]=='json' ) {
 	$ws->update_item_no_files_search_results();
 } else {
 	$ws->update_from_sparql();
+	$ws->import_item_whitelist();
+	$ws->import_item_blacklist();
 	$ws->make_rc_unavailable();
 	$ws->add_missing_item_details();	
 	$ws->purge_items_without_files();
