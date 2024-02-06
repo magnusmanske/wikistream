@@ -58,6 +58,7 @@ $(document).ready ( function () {
             'vue_components/search-page.html',
             'vue_components/person-page.html',
             'vue_components/candidates-page.html',
+            'vue_components/year-page.html',
             ] )
     ] )
     .then ( () => {
@@ -74,6 +75,8 @@ $(document).ready ( function () {
             { path: '/person/:q', component: PersonPage , props:true },
             { path: '/candidates', component: CandidatesPage , props:true },
             { path: '/candidates/:offset', component: CandidatesPage , props:true },
+            { path: '/year', component: YearPage , props:true },
+            { path: '/year/:year', component: YearPage , props:true },
         ] ;
         router = new VueRouter({routes}) ;
         app = new Vue ( { router } ) .$mount('#app') ;

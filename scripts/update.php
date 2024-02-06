@@ -34,18 +34,22 @@ if ( isset($argv[1]) and $argv[1]=='json' ) {
 	$ws->import_item_whitelist();
 	$ws->import_item_blacklist();
 	$ws->make_rc_unavailable();
-	$ws->add_missing_item_details();	
+	$ws->add_missing_item_details();
+	$ws->clear_bad_genres();
 	$ws->purge_items_without_files();
+	$ws->remove_unused_people();
 	$ws->update_persons();
 	$ws->import_missing_section_labels();
 	$ws->generate_main_page_data();
+	print "Main page data generated\n";
+
+	# Update candidate items with no files
+	$ws->update_item_no_files();
+	$ws->update_item_no_files_search_results();
 
 	# These edits will take too long to percolate into SPARQL to be useful now, so prepare for the next update
 	$ws->annotate_ia_movies();
 
-	# Update candidate items with no files
-	$ws->update_item_no_files();
-	// $ws->update_item_no_files_search_results(); // TODO uncomment when first run is complete
 }
 
 ?>

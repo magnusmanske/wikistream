@@ -107,7 +107,7 @@
         </router-link>
         <div class="legend">
             {{entry.title}}
-            <div v-if='entry.minutes!=null'>[{{entry.minutes}} min]</siv>
+            <div v-if='entry.minutes!=null || entry.year!=null'>[<span v-if='entry.year!=null'>{{entry.year}}</span><span v-if='entry.minutes!=null && entry.year!=null'>;&nbsp;</span><span v-if='entry.minutes!=null'>{{entry.minutes}} min</span>]</div>
         </div>
     </div>
 </div>

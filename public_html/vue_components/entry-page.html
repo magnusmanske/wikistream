@@ -8,6 +8,11 @@ span.fluc span.wd-link-as-text {
 span.fluc span.wd-link-as-text:first-letter {
     text-transform:uppercase;
 }
+div.play_button_legend {
+    opacity: .6;
+    color: white;
+    text-align: center;
+}
 </style>
 
 <template id='entry-template'>
@@ -16,6 +21,9 @@ span.fluc span.wd-link-as-text:first-letter {
     <div class="row" style="width:100%;">
         <div v-if='loading'>
             <i tt='loading'></i>
+        </div>
+        <div v-else-if='item==null||entry==null'>
+            <i tt="item_not_in_wikiflix"></i>
         </div>
         <div v-else style="width: 100%">
             <div style="display:flex;">
@@ -47,14 +55,17 @@ span.fluc span.wd-link-as-text:first-letter {
                     </div>
                     <div style="display:flex; margin-bottom: 0.5rem;">
                         <div v-for="v in entry.entry_files" style="margin-right:1rem;">
-                            <router-link type="button" class="btn btn-outline-light btn-lg" :to="'/play/'+v.property+'/'+v.key" :title="v.key" style="height:54px;">
-                                ▶ <span v-if='v.is_trailer' tt="play_trailer"></span>
-                                <span v-else tt="play"></span>
-                                <img v-if='v.property==10' src='https://upload.wikimedia.org/wikipedia/commons/thumb/4/4a/Commons-logo.svg/24px-Commons-logo.svg.png' />
-                                <img v-if='v.property==724' src='https://upload.wikimedia.org/wikipedia/commons/thumb/5/51/Internet_Archive_Logo.svg/32px-Internet_Archive_Logo.svg.png' />
-                                <img v-if='v.property==1651' src='https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/32px-YouTube_full-color_icon_%282017%29.svg.png' />
-                                <img v-if='v.property==4015' src='https://upload.wikimedia.org/wikipedia/commons/thumb/f/f1/Vimeo_icon_block.png/32px-Vimeo_icon_block.png' />
-                            </router-link>
+                            <div>
+                                <router-link type="button" class="btn btn-outline-light btn-lg" :to="'/play/'+v.property+'/'+v.key" :title="v.key" style="height:54px;">
+                                    ▶ <span v-if='v.is_trailer' tt="play_trailer"></span>
+                                    <span v-else tt="play"></span>
+                                    <img v-if='v.property==10' src='https://upload.wikimedia.org/wikipedia/commons/thumb/4/4a/Commons-logo.svg/24px-Commons-logo.svg.png' />
+                                    <img v-if='v.property==724' src='https://upload.wikimedia.org/wikipedia/commons/thumb/5/51/Internet_Archive_Logo.svg/32px-Internet_Archive_Logo.svg.png' />
+                                    <img v-if='v.property==1651' src='https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/32px-YouTube_full-color_icon_%282017%29.svg.png' />
+                                    <img v-if='v.property==4015' src='https://upload.wikimedia.org/wikipedia/commons/thumb/f/f1/Vimeo_icon_block.png/32px-Vimeo_icon_block.png' />
+                                </router-link>
+                                <div v-if='v.minutes!=null' class="play_button_legend">[{{v.minutes}} min]</div>
+                            </div>
                         </div>
                     </div>
                     <div v-for="person_prop in associated_people_props()">
@@ -105,17 +116,20 @@ let EntryPage = Vue.extend ( {
     created : function () {
         let self = this;
         let entry_q = 'Q'+self.q;
+        self.log('entry_loaded');
         fetch("./api.php?action=get_entry&q="+self.q)
         .then(results => {
             results.json().then( j => {
                 self.entry=j.data;
                 wd.getItemBatch([entry_q],function(){
                     self.item = wd.getItem(entry_q);
-                    self.load_description(entry_q,'en',function(desc){
-                        if ( typeof desc!='undefined' && desc!='' ) self.description = desc;
-                    });
-                    self.add_cast();
-                    self.add_tags();
+                    if ( self.item!=null && self.entry!=null ) {
+                        self.load_description(entry_q,'en',function(desc){
+                            if ( typeof desc!='undefined' && desc!='' ) self.description = desc;
+                        });
+                        self.add_cast();
+                        self.add_tags();
+                    }
                     self.loading = false;
                 })
             });
@@ -175,7 +189,8 @@ let EntryPage = Vue.extend ( {
                     }
                 }
             });
-        }
+        },
+        log: function(event) { fetch("./api.php?action=log&event="+event+'&q='+this.q).then(results => {}) }
     } ,
     template:'#entry-template'
 } ) ;

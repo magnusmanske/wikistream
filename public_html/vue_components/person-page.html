@@ -48,6 +48,7 @@ let PersonPage = Vue.extend ( {
     created : function () {
         let self = this;
         let q = self.q*1;
+        self.log('person_loaded');
         fetch("./api.php?action=get_person&q="+q)
         .then(results => {
             results.json().then( j => {
@@ -63,6 +64,7 @@ let PersonPage = Vue.extend ( {
     updated : function () { tt.updateInterface(this.$el) ; } ,
     mounted : function () { tt.updateInterface(this.$el) ; } ,
     methods : {
+        log: function(event) { fetch("./api.php?action=log&event="+event+'&q='+this.q).then(results => {}) }
     } ,
     template:'#person-page-template'
 } ) ;

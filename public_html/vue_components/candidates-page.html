@@ -81,7 +81,7 @@
 'use strict';
 
 let CandidatesPage = Vue.extend ( {
-    props : [,'offset'] ,
+    props : ['offset'] ,
     data : function () { return { loading:true,candidates:[],total_candidates:0 } } ,
     created : function () {
         let self = this;

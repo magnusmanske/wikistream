@@ -19,10 +19,12 @@ let PlayPage = Vue.extend ( {
     props : ['source_prop','source_key'] ,
     data : function () { return {  } } ,
     created : function () {
+        this.log("play_page_loaded")
     } ,
     updated : function () { tt.updateInterface(this.$el) ; } ,
     mounted : function () { tt.updateInterface(this.$el) ; } ,
     methods : {
+        log: function(event) { fetch("./api.php?action=log&event="+event+'&source_prop='+this.source_prop+'&source_key='+this.source_key).then(results => {}) }
     } ,
     template:'#play-template'
 } ) ;

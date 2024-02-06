@@ -41,11 +41,21 @@ if ( $action=='get_entry' ) {
 } else if ( $action=='get_person' ) {
 	$q = $ws->tfc->getRequest('q',0)*1;
 	$out['data'] = $ws->getPerson($q);
+} else if ( $action=='get_items_by_year' ) {
+	$year = $ws->tfc->getRequest('year','50')*1;
+	$out['data'] = $ws->get_items_by_year($year);
 } else if ( $action=='get_candidate_items' ) {
 	$limit = $ws->tfc->getRequest('limit','50')*1;
 	$offset = $ws->tfc->getRequest('offset','0')*1;
 	$out['data'] = $ws->get_candidate_items($limit,$offset);
 	$out['total_candidates'] = $ws->get_total_candidate_items();
+} else if ( $action=='log' ) {
+	$event = $ws->tfc->getRequest('event','');
+	$q = $ws->tfc->getRequest('q',0)*1;
+	$source_prop = $ws->tfc->getRequest('source_prop','');
+	$source_key = $ws->tfc->getRequest('source_key','');
+	if ( $q==0 and $source_key!='' and $source_prop!='' ) $q = $ws->getItemForFile($source_prop,$source_key);
+	$ws->logEvent($event,$q);
 } else {
 	$out['status'] = "Bad action: {$action}";
 }

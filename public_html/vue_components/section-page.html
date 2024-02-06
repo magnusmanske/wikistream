@@ -23,6 +23,7 @@ let SectionPage = Vue.extend ( {
     data : function () { return { loading:true,section:{} } } ,
     created : function () {
         let self = this;
+        self.log('section_loaded');
         let url = "./api.php?action=get_section&max=all&q="+self.section_q;
         if ( typeof self.section_prop!='undefined' ) url += "&prop="+self.section_prop;
         fetch(url)
@@ -36,6 +37,7 @@ let SectionPage = Vue.extend ( {
     updated : function () { tt.updateInterface(this.$el) ; } ,
     mounted : function () { tt.updateInterface(this.$el) ; } ,
     methods : {
+        log: function(event) { fetch("./api.php?action=log&event="+event+'&q='+this.section_q).then(results => {}) }
     } ,
     template:'#section-page-template'
 } ) ;

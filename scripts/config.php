@@ -20,9 +20,10 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig {
 	public $toolkey = "wikiflix";
 	public $tool_db = 'wikiflix_p';
 	public $whitelist_page = ''; # 'Help:WikiFlix/Movie whitelist';
-	public $blacklist_page = ''; # 'Help:WikiFlix/Movie blacklist';
+	public $blacklist_page = 'Help:WikiFlix/Movie blacklist';
+	public $bad_genres = [185529,4373044,3461143,599558]; # P136
 	public $sparql =  [
-		"SELECT ?q ?hasMedia {
+		"SELECT DISTINCT ?q {
 			?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P6216 wd:Q19652 .
 			MINUS { ?q wdt:P31 wd:Q97570383 } # Glass positive
 			OPTIONAL { ?q wdt:P724 ?ia }
@@ -32,21 +33,23 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig {
 			BIND(BOUND(?ia)||BOUND(?commons)||BOUND(?youtube)||BOUND(?vimeo) as ?hasMedia)
 			FILTER(?hasMedia=true)
 		}",
-		"SELECT ?q {
-			?q (wdt:P31/(wdt:P279*)) wd:Q11424 . # A movie
+		"SELECT DISTINCT ?q {
+			?q (wdt:P31/(wdt:P279*)) wd:Q11424 . # A film
 			?q p:P10 ?statement . # Commons video
 			?statement ps:P10 ?commons . # The video ID (not used here)
 			?statement pq:P3831 wd:Q89347362 # full video
 			MINUS {?q wdt:P6216 wd:Q19652 } # but don't bother with the public domain ones
 		}",
-		"SELECT ?q {
-			?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P724 ?ia . # A film with an Internet Archive value
+		"SELECT DISTINCT ?q {
+			?q (wdt:P31/(wdt:P279*)) wd:Q11424 . # A film
 			?q wdt:P2047 ?duration . # with a duration
 			?q p:P724 ?statement . # with an Internet Archive ID
+			MINUS { ?statement pq:P11484 wd:Q124428688 } . # Without 'do not use for WikiFlix'
 			?statement ps:P724 ?ia .
 			?statement pq:P2047 ?ia_duration . # that also has a duration
 			BIND(ABS(?ia_duration/?duration*100) AS ?percent)
 			FILTER(?percent>=60 && ?percent<=150) # that is similar to the item duration
+			?q wdt:P577 ?date . FILTER (year(?date)<=1928) # 1928 or earlier
 		}",
 
 	];
@@ -73,7 +76,7 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig {
 
 
 	protected function get_items_by_female_directors(&$ws,$num=25,$section_q=null) {
-		return $ws->get_item_view('vw_ranked_entries',$num,$section_q,'SELECT DISTINCT `item_q` FROM `section`,`person` WHERE `property`=57 AND `person`.`q`=`section_q` AND `person`.`gender`="F"');
+		return $ws->get_item_view('vw_ranked_entries_blacklist',$num,$section_q,'SELECT DISTINCT `item_q` FROM `section`,`person` WHERE `property`=57 AND `person`.`q`=`section_q` AND `person`.`gender`="F"');
 	}
 
 }
@@ -83,6 +86,7 @@ class WikiStreamConfigWikiVibes extends WikiStreamConfig {
 	public $tool_db = 'vibes_p';
 	public $whitelist_page = ''; # 'Help:WikiVibes/audio whitelist';
 	public $blacklist_page = '';
+	public $bad_genres = []; # P136
 	public $sparql = [
 		"SELECT ?q ?file { ?q wdt:P51 ?file ; wdt:P31/wdt:P279* wd:Q2188189 }",
 	];

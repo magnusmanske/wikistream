@@ -17,10 +17,12 @@ let MainPage = Vue.extend ( {
     data : function () { return { sections:[] } } ,
     created : function () {
         this.sections = config.sections ;
+        this.log('main_page_loaded');
     } ,
     updated : function () { tt.updateInterface(this.$el) ; } ,
     mounted : function () { tt.updateInterface(this.$el) ; } ,
     methods : {
+        log: function(event) { fetch("./api.php?action=log&event="+event).then(results => {}) }
     } ,
     template:'#main-page-template'
 } ) ;

@@ -52,7 +52,7 @@ class WikiStream {
 		$o->entry_files = json_decode($o->files);
 
 		$sql = "SELECT * FROM `section` WHERE `item_q`={$q}" ;
-		if ( count($this->config->bad_sections)>0 ) $sql .= " AND `section_q` NOT IN (".implode($this->config->bad_sections).")";
+		if ( count($this->config->bad_genres)>0 ) $sql .= " AND `section_q` NOT IN (".implode($this->config->bad_genres).")";
 		$result = $this->tfc->getSQL ( $this->db , $sql ) ;
 		$sections = [];
 		$to_load = [] ;
@@ -94,6 +94,12 @@ class WikiStream {
 
 		# All entries with a file on Commons
 		foreach ( $this->config->sparql AS $sparql_id => $sparql ) {
+			# Filter out bad genres
+			if ( isset($this->config->bad_genres) and count($this->config->bad_genres)>0 ) {
+				$genre_filter = "  . VALUES ?bad_genre { wd:Q".implode(' wd:Q',$this->config->bad_genres)."} MINUS { ?q wdt:P136 ?bad_genre }";
+				$sparql = "SELECT ?q { {".$sparql."}".$genre_filter."}";
+			}
+
 			$found = 0 ;
 			foreach ( $this->tfc->getSPARQL_TSV($sparql) AS $row ) {
 				$row = (object) $row;
@@ -110,6 +116,11 @@ class WikiStream {
 		$new_qs = array_unique($new_qs);
 		print "Adding ".count($new_qs)." new items\n";
 		$sql = "INSERT IGNORE INTO `item` (`q`) VALUES (".implode("),(",$new_qs).")" ;
+		$this->tfc->getSQL ( $this->db , $sql ) ;
+	}
+
+	public function remove_unused_people() {
+		$sql = "DELETE FROM person WHERE q NOT IN (SELECT DISTINCT section_q from section)";
 		$this->tfc->getSQL ( $this->db , $sql ) ;
 	}
 
@@ -136,7 +147,7 @@ class WikiStream {
 				$target_q = $item->getTarget($claim);
 				$target_q_numeric = preg_replace ( '/\D/' , '' , $target_q );
 				if ( !$target_q ) continue;
-				if ( in_array($target_q_numeric,$this->config->bad_sections) ) continue;
+				if ( in_array($target_q_numeric,$this->config->bad_genres) ) continue;
 				$sections[] = "({$item_q_numeric},{$prop},{$target_q_numeric})";
 			}
 		}
@@ -152,6 +163,16 @@ class WikiStream {
 				$key = $c->mainsnak->datavalue->value ;
 				$key_safe = $this->db->real_escape_string($key);
 
+				# Check for "do not use for WikiFlix" qualifier
+				$skip_file = false;
+				if ( isset($c->qualifiers) and isset($c->qualifiers->P11484) ) {
+					foreach ( $c->qualifiers->P11484 AS $qual ) {
+						if ( $qual->datavalue->value->id=='Q124428688' ) $skip_file = true;
+					}
+				}
+				if ( $skip_file ) continue;
+
+				# Check for trailer qualifier
 				$is_trailer_safe = 0;
 				if ( isset($c->qualifiers) and isset($c->qualifiers->P3831) ) {
 					foreach ( $c->qualifiers->P3831 AS $qual ) {
@@ -165,6 +186,7 @@ class WikiStream {
 
 		$image = $item->getFirstString('P18');
 		if ( $image=='' ) $image = $item->getFirstString('P154');
+		if ( $image=='' ) $image = $item->getFirstString('P3383');
 		if ( $image=='' ) $image_safe = 'null';
 		else $image_safe = '"'.$this->db->real_escape_string($image).'"';
 
@@ -348,7 +370,7 @@ class WikiStream {
 	public function get_top_sections($num=20,$properties=[],$skip_section_q=null) {
 		if ( $skip_section_q==null ) $skip_section_q = $this->config->skip_section_q;
 		if ( count($properties)==0 ) $properties = $this->config->misc_section_props;
-		$skip_section_q = array_merge($skip_section_q,$this->config->bad_sections);
+		$skip_section_q = array_merge($skip_section_q,$this->config->bad_genres);
 		$ret = [];
 		$sql = "SELECT *,(SELECT `value` FROM `label` WHERE `language`='{$this->language}' AND `q`=`section_q`) AS `label` FROM `vw_section_property_q` WHERE `property` IN (".implode(',',$properties).") AND `section_q` NOT IN (".implode(',',$skip_section_q).") LIMIT {$num}" ;
 		$result = $this->tfc->getSQL ( $this->db , $sql ) ;
@@ -360,11 +382,24 @@ class WikiStream {
 		if ( $skip_section_q==null ) $skip_section_q = $this->config->skip_section_q;
 		$min_items = 10;
 		if ( count($properties)==0 ) $properties = $this->config->misc_section_props;
-		$skip_section_q = array_merge($skip_section_q,$this->config->bad_sections);
+		$skip_section_q = array_merge($skip_section_q,$this->config->bad_genres);
 		$ret = [];
 		$sql = "SELECT *,(SELECT `value` FROM `label` WHERE `language`='{$this->language}' AND `q`=`section_q`) AS `label` FROM `vw_section_property_q` WHERE `cnt`>={$min_items} AND `property` IN (".implode(',',$properties).") AND `section_q` NOT IN (".implode(',',$skip_section_q).") ORDER BY rand() LIMIT {$num}" ;
 		$result = $this->tfc->getSQL ( $this->db , $sql ) ;
 		while($o = $result->fetch_object()) $ret[] = $o ;
+		return $ret;
+	}
+
+	protected function get_year_stats() {
+		$ret = [];
+		$sql = "SELECT `year`,count(*) AS cnt FROM `item` WHERE `year` IS NOT NULL GROUP BY `year` ORDER BY `year`";
+		$result = $this->tfc->getSQL ( $this->db , $sql ) ;
+		while($o = $result->fetch_object()) {
+			$decade = floor($o->year/10)*10;
+			if ( !isset($ret[$decade]) ) $ret[$decade] = [];
+			$ret[$decade][] = $o ;
+		}
+		ksort($ret,SORT_NUMERIC);
 		return $ret;
 	}
 
@@ -378,6 +413,10 @@ class WikiStream {
 		$out['sections'][] = [
 			'title_key' => "highly_ranked",
 			'entries' => $this->get_ranked_items(25)
+		];
+		$out['sections'][] = [
+			'title_key' => "popular_entries",
+			'entries' => $this->get_item_view('vw_popular_entries',25)
 		];
 		$this->config->add_special_sections($this,$out);
 
@@ -401,6 +440,8 @@ class WikiStream {
 		if($o = $result->fetch_object()) $out['person_total'] = $o->cnt ;
 
 		$out['section_total'] = count($this->get_top_sections(PHP_INT_MAX));
+
+		$out['years'] = $this->get_year_stats();
 
 		$out['misc'] = $this->config->interface_config;
 
@@ -522,6 +563,10 @@ class WikiStream {
 	}
 
 	public function import_item_blacklist() {
+		# Delete old blacklist
+		$sql = "TRUNCATE `blacklist`";
+		$this->tfc->getSQL ( $this->db , $sql ) ;
+
 		if ( $this->config->blacklist_page=='' ) return;
 
 		# Get item list from blacklist page
@@ -533,10 +578,6 @@ class WikiStream {
 			$q = $m[1]*1;
 			$qs[] = $q ;
 		}
-
-		# Delete old blacklist
-		$sql = "TRUNCATE `blacklist`";
-		$this->tfc->getSQL ( $this->db , $sql ) ;
 		if ( count($qs)==0 ) return;
 
 		# Create new blacklist
@@ -554,9 +595,9 @@ class WikiStream {
 	}
 
 	public function purge_items_without_files() {
-		$sql = "DELETE from section where item_q NOT IN (select item_q FROM `file`)";
+		$sql = "DELETE FROM section WHERE item_q NOT IN (SELECT item_q FROM `file`)";
 		$this->tfc->getSQL ( $this->db , $sql ) ;
-		$sql = "DELETE from item where q NOT IN (select item_q FROM `file`)";
+		$sql = "DELETE FROM item WHERE q NOT IN (SELECT item_q FROM `file`)";
 		$this->tfc->getSQL ( $this->db , $sql ) ;
 	}
 
@@ -675,6 +716,7 @@ class WikiStream {
 		$sparql = "SELECT DISTINCT ?q ?qLabel (year(?date) AS ?year) ?duration ?sitelinks {
 					  ?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P6216 wd:Q19652 ; wikibase:sitelinks ?sitelinks .
 					  MINUS { ?q wdt:P31 wd:Q97570383 } # Glass positive
+					  MINUS { ?q wdt:P793 wd:Q1268687 } # Lost film
 					  OPTIONAL { ?q wdt:P724 ?ia }
 					  OPTIONAL { ?q wdt:P10 ?commons }
 					  OPTIONAL { ?q wdt:P1651 ?youtube }
@@ -773,6 +815,58 @@ class WikiStream {
 		$result = $this->tfc->getSQL ( $this->db , $sql ) ;
 		if($o = $result->fetch_object()) $ret = $o->total;
 		return $ret;
+	}
+
+	public function get_items_by_year($year) {
+		return $this->get_item_view('vw_ranked_entries',PHP_INT_MAX,null,"SELECT q FROM item WHERE year={$year}");
+	}
+
+	public function clear_bad_genres() {
+		if ( !isset($this->config->bad_genres) ) return ;
+		if ( count($this->config->bad_genres)==0 ) return ;
+
+		# Get items in bad genres
+		$qs = [];
+		$sql = "SELECT DISTINCT item_q FROM section WHERE section_q IN (".implode(',',$this->config->bad_genres).") AND property=136";
+		$result = $this->tfc->getSQL ( $this->db , $sql ) ;
+		while($o = $result->fetch_object()) $qs[] = $o->item_q;
+		if ( count($qs)==0 ) return ;
+
+		# Clear files
+		$sql = "DELETE FROM `file` WHERE item_q IN (".implode(",",$qs).")";
+		$this->tfc->getSQL ( $this->db , $sql ) ;
+
+		# Clear sections
+		$sql = "DELETE FROM `section` WHERE item_q IN (".implode(",",$qs).") OR section_q IN (".implode(",",$qs).")";
+		$this->tfc->getSQL ( $this->db , $sql ) ;
+		$sql = "DELETE FROM `section` WHERE section_q IN (".implode(",",$this->config->bad_genres).") AND property=136";
+		$this->tfc->getSQL ( $this->db , $sql ) ;
+
+		# Clear items
+		$sql = "DELETE FROM `item` WHERE q IN (".implode(",",$qs).")";
+		$this->tfc->getSQL ( $this->db , $sql ) ;
+	}
+
+	// Returns the item for a property/file combination
+	// Returns the first one found (there might be multiple, not good)
+	// Returns 0 if not found
+	public function getItemForFile($prop,$key) {
+		$prop_safe = $prop*1;
+		$key_safe = $this->db->real_escape_string($key);
+		$sql = "SELECT `item_q` FROM `file` WHERE `property`={$prop_safe} AND `key`='{$key_safe}' LIMIT 1";
+		$result = $this->tfc->getSQL ( $this->db , $sql ) ;
+		if($o = $result->fetch_object()) return $o->item_q;
+		return 0;
+	}
+
+	public function logEvent($event,$q=null) {
+		$ts = $this->tfc->getCurrentTimestamp();
+		$ts_safe = substr($ts, 0, 10); # Just the hour
+		$event_safe = $this->db->real_escape_string($event);
+		if ( !isset($q) or $q==null ) $q_safe = 'null';
+		else $q_safe = $q*1;
+		$sql = "INSERT INTO `logging` (`timestamp`,`event`,`q`,`counter`) VALUES ('{$ts_safe}','{$event_safe}',{$q},1) ON DUPLICATE KEY UPDATE `counter`=`counter`+1" ;
+		$this->tfc->getSQL ( $this->db , $sql ) ;
 	}
 }
 

@@ -1,0 +1,58 @@
+<template id='year-page-template'>
+<div class='container-fluid'>
+    <page-header></page-header>
+    <div class="row" style="width:100%;">
+        <div style="width: 100%;">
+            <div style="display: flex;">
+                <div style="flex-grow: 1;"></div>
+                <div style="width: 50%; margin-bottom: 1rem;">
+                    <table>
+                        <tr v-for="years,decade in config.years">
+                            <th>{{decade}}s</th>
+                            <td v-for='y in years'>
+                                <router-link :to='"/year/"+y.year' :title="y.cnt+' movies'">{{y.year}}</router-link>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                <div style="flex-grow: 1;"></div>
+            </div>
+            <div v-if="!loading && entries.length>0">
+                <h3>{{year}}</h3>
+                <section-row :entries="entries" multi_row="1"></section-row>
+            </div>
+        </div>
+    </div>
+
+</div>
+</template>
+
+<script>
+'use strict';
+
+let YearPage = Vue.extend ( {
+    props : ['year'] ,
+    data : function () { return { loading:true,entries:[] } } ,
+    created : function () {
+        let self = this;
+        self.log('year_loaded');
+        if ( typeof self.year!='undefined' ) {
+            fetch("./api.php?action=get_items_by_year&year="+self.year)
+            .then(results => {
+                results.json().then( j => {
+                    self.entries = j.data;
+                    self.loading = false;
+                })
+            })
+        } else {
+            self.loading = false;
+        }
+    } ,
+    updated : function () { tt.updateInterface(this.$el) ; } ,
+    mounted : function () { tt.updateInterface(this.$el) ; } ,
+    methods : {
+        log: function(event) { fetch("./api.php?action=log&event="+event+'&q='+(this.year??0)).then(results => {}) }
+    } ,
+    template:'#year-page-template'
+} ) ;
+</script>
