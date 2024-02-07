@@ -139,7 +139,6 @@ class WikiStream {
 	protected function add_item_details($wil,$item_q_numeric,&$qs,&$sections,&$entry_files) {
 		$item = $wil->getItem($item_q_numeric);
 		if ( !isset($item) ) return;
-		$qs[] = $item_q_numeric;
 
 		# Sections
 		foreach ( array_merge($this->config->misc_section_props,$this->config->people_props,$this->config->grouping_props) AS $prop ) {
@@ -147,10 +146,12 @@ class WikiStream {
 				$target_q = $item->getTarget($claim);
 				$target_q_numeric = preg_replace ( '/\D/' , '' , $target_q );
 				if ( !$target_q ) continue;
-				if ( in_array($target_q_numeric,$this->config->bad_genres) ) continue;
+				if ( in_array($target_q_numeric,$this->config->bad_genres) ) throw new Exception("Bad genre");
 				$sections[] = "({$item_q_numeric},{$prop},{$target_q_numeric})";
 			}
 		}
+
+		$qs[] = $item_q_numeric; # Only now, section filter might throw exception
 
 		# Files
 		foreach ( $this->config->file_props AS $property ) {
@@ -219,7 +220,11 @@ class WikiStream {
 		$sections = [] ;
 		$entry_files = [] ;
 		foreach ( $chunk AS $q_numeric ) {
-			$this->add_item_details($wil,$q_numeric,$qs,$sections,$entry_files);
+			try {
+				$this->add_item_details($wil,$q_numeric,$qs,$sections,$entry_files);
+			} catch (Exception $e) {
+				// print "Filtered out {$q_numeric} for bad genre\n";
+			}
 		}
 		if ( count($qs) == 0 ) return ;
 
