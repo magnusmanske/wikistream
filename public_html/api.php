@@ -22,7 +22,7 @@ if ( $action=='get_entry' ) {
 } else if ( $action=='get_section' ) {
 	# ATTENTION always assumes property is set
 	$max = $ws->tfc->getRequest('max',25);
-	if ($max='all') $max = PHP_INT_MAX;
+	if ($max=='all') $max = PHP_INT_MAX;
 	else $max = $max*1;
 	$section = (object) [
 		'section_q' => $ws->tfc->getRequest('q',0)*1,
