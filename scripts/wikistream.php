@@ -11,10 +11,11 @@ class WikiStream {
 	public $config;
 	protected $db;
 
-	public function __construct($config=null) {
+	public function __construct($config=null,$tfc=null) {
 		if ( $config==null ) die("Config not set");
 		$this->config = $config;
-		$this->tfc = new ToolforgeCommon($this->config->toolkey) ;
+		if ( $tfc==null ) $this->tfc = new ToolforgeCommon($this->config->toolkey) ;
+		else $this->tfc = $tfc;
 		$this->db = $this->tfc->openDBtool ( $this->config->tool_db ) ;
 	}
 
@@ -88,6 +89,29 @@ class WikiStream {
 		return $ret ;
 	}
 
+	public function import_commons_video_minutes() {
+		$sql = "SELECT * FROM `file` WHERE `property`=10 AND `minutes` IS NULL";
+		$result = $this->tfc->getSQL ( $this->db , $sql ) ;
+		while($o = $result->fetch_object()) {
+			unset($minutes);
+			$url = "https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=metadata&&titles=File:".urlencode($o->key);
+			$j = $this->get_json_from_url($url);
+			if ( !isset($j) or !isset($j->query->pages) ) continue; // TODO error message
+			foreach ( $j->query->pages AS $page ) {
+				if ( !isset($page) or !isset($page->imageinfo) or !isset($page->imageinfo[0]) or !isset($page->imageinfo[0]->metadata) ) continue ;
+				foreach ( $page->imageinfo[0]->metadata AS $m ) {
+					if ( $m->name=='playtime_seconds' ) $minutes = round($m->value/60);
+					else if ( $m->name=='playtime_minutes' ) $minutes = round($m->value*1);
+					else if ( $m->name=='length' ) $minutes = round($m->value/60);
+					else if ( $m->name=='duration' ) $minutes = round($m->value/60);
+				}
+			}
+			if ( !isset($minutes) ) continue;
+			$sql = "UPDATE `file` SET `minutes`={$minutes} WHERE id={$o->id} AND `minutes` IS NULL" ;
+			$this->tfc->getSQL ( $this->db , $sql ) ;
+		}
+	}
+
 	public function update_from_sparql() {
 		$new_qs = [] ;
 		$existing_qs = $this->get_items_in_db();
@@ -156,6 +180,7 @@ class WikiStream {
 		# Files
 		foreach ( $this->config->file_props AS $property ) {
 			foreach ( $item->getClaims($property) AS $c ) {
+				if ( isset($c->rank) and $c->rank=='deprecated' ) continue;
 				if ( !isset($c->mainsnak) ) continue ;
 				if ( !isset($c->mainsnak->datavalue) ) continue ;
 				if ( !isset($c->mainsnak->datavalue->value) ) continue ;
@@ -318,7 +343,6 @@ class WikiStream {
 		$sql = "SELECT * FROM `{$view_name}` WHERE 1=1";
 		if ( isset($section_q) and $section_q!=null ) $sql .= " AND `q` IN (SELECT item_q FROM section WHERE section_q={$section_q})";
 		if ( $subquery!=null ) $sql .= " AND q IN ({$subquery})" ;
-		// $sql .= " ORDER BY sites DESC,minutes DESC,q" ;
 		$sql .= " LIMIT {$num}" ;
 		$result = $this->tfc->getSQL ( $this->db , $sql ) ;
 		while($o = $result->fetch_object()) {
@@ -548,6 +572,19 @@ class WikiStream {
 		$out = 'var config = ' . json_encode($out) . ';' ;
 		$filename = __DIR__.'/../public_html/config.js';
 		file_put_contents($filename,$out);
+
+		$sql = "SELECT (select count(q) from item) as items,(select count(id) FROM `file`) AS files,(select count(q) from person) as people";
+		$result = $this->tfc->getSQL ( $this->db , $sql ) ;
+		if($o = $result->fetch_object()) {
+			$ts = $this->tfc->getCurrentTimestamp();
+			$ts_safe = substr($ts, 0, 10); # Just the hour
+			$sql = "REPLACE INTO `logging` (`timestamp`,`event`,`q`,`counter`) VALUES ('{$ts_safe}','total_items',0,{$o->items})";
+			$this->tfc->getSQL ( $this->db , $sql ) ;
+			$sql = "REPLACE INTO `logging` (`timestamp`,`event`,`q`,`counter`) VALUES ('{$ts_safe}','total_files',0,{$o->files})";
+			$this->tfc->getSQL ( $this->db , $sql ) ;
+			$sql = "REPLACE INTO `logging` (`timestamp`,`event`,`q`,`counter`) VALUES ('{$ts_safe}','total_people',0,{$o->people})";
+			$this->tfc->getSQL ( $this->db , $sql ) ;
+		}
 	}
 
 	public function import_item_whitelist() {
@@ -824,6 +861,24 @@ class WikiStream {
 
 	public function get_items_by_year($year) {
 		return $this->get_item_view('vw_ranked_entries',PHP_INT_MAX,null,"SELECT q FROM item WHERE year={$year}");
+	}
+
+	public function set_user_list_state($user_id,$q,$state) {
+		$user_id *= 1 ;
+		$q *= 1 ;
+		$state *= 1 ;
+		if ( $state==0 ) $sql = "DELETE FROM `user_item_list` WHERE `user_id`={$user_id} AND `q`={$q}" ;
+		else $sql = "INSERT IGNORE INTO `user_item_list` (`user_id`,q) VALUES ({$user_id},{$q})" ;
+		$this->tfc->getSQL ( $this->db , $sql ) ;
+	}
+
+	public function is_user_watching_item($user_id,$q) {
+		$user_id *= 1 ;
+		$q *= 1 ;
+		$sql = "SELECT `id` FROM `user_item_list` WHERE `user_id`={$user_id} AND `q`={$q}";
+		$result = $this->tfc->getSQL ( $this->db , $sql ) ;
+		if($o = $result->fetch_object()) return true;
+		return false;
 	}
 
 	public function clear_bad_genres() {

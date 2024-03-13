@@ -39,6 +39,18 @@ div.page-header:hover .page-header-movies-total {
     <a href='#' @click.prevent="toggle_search_bar" style="font-size: 24pt; margin-left: 0.5rem;">
         &#x1f50d;
     </a>
+    <widar>
+        <template #loggedin>
+            <router-link to='/you'>
+                <span style="font-size:26pt; color: green;" tt_title="logged_in">
+                    <img border=0 src="https://upload.wikimedia.org/wikipedia/commons/thumb/6/61/Emoji_u1f464.svg/32px-Emoji_u1f464.svg.png" />
+                </span>
+            </router-link>
+        </template>
+        <template #loggedout>
+            <a href="/api.php?action=authorize" style="font-size:26pt;" tt_title="log_in">👤</a>
+        </template>
+    </widar>
 </div>
 </template>
 

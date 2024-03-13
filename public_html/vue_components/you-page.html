@@ -1,0 +1,45 @@
+<template id='you-page-template'>
+<div class='container-fluid'>
+    <page-header></page-header>
+    <div class="row" style="width:100%; display: block;">
+        <div>
+            <h1>{{user_name()}}</h1>
+        </div>
+        <div v-if="!loading">
+            <h2 tt='your_list'></h2>
+            <section-row :entries="entries" multi_row="1"></section-row>
+        </div>
+    </div>
+
+</div>
+</template>
+
+<script>
+'use strict';
+
+let YouPage = Vue.extend ( {
+    props : ['year'] ,
+    data : function () { return { loading:true,entries:[] } } ,
+    created : function () {
+        let self = this;
+        // self.log('section_loaded');
+        let url = "./api.php?action=get_your_list";
+        fetch(url)
+        .then(results => {
+            results.json().then( j => {
+                self.entries=j.data;
+                self.loading = false;
+            })
+        })
+    } ,
+    updated : function () { tt.updateInterface(this.$el) ; } ,
+    mounted : function () { tt.updateInterface(this.$el) ; } ,
+    methods : {
+        user_name: function() {
+            if ( typeof widar!='undefined' ) return widar.userinfo.name ;
+        },
+        log: function(event) { fetch("./api.php?action=log&event="+event+'&q='+(this.year??0)).then(results => {}) }
+    } ,
+    template:'#you-page-template'
+} ) ;
+</script>

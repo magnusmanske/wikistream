@@ -59,9 +59,11 @@ $(document).ready ( function () {
             'vue_components/person-page.html',
             'vue_components/candidates-page.html',
             'vue_components/year-page.html',
+            'vue_components/you-page.html',
             ] )
     ] )
     .then ( () => {
+        widar_api_url = "https://"+config.misc.toolname+".toolforge.org/api.php";
         wd_link_wd = wd ;
         const routes = [
             { path: '/', component: MainPage , props:true },
@@ -77,6 +79,7 @@ $(document).ready ( function () {
             { path: '/candidates/:offset', component: CandidatesPage , props:true },
             { path: '/year', component: YearPage , props:true },
             { path: '/year/:year', component: YearPage , props:true },
+            { path: '/you', component: YouPage , props:true },
         ] ;
         router = new VueRouter({routes}) ;
         app = new Vue ( { router } ) .$mount('#app') ;

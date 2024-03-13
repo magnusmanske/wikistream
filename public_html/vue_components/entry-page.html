@@ -51,6 +51,16 @@ div.play_button_legend {
                         </span>
                     </div>
                     <div style="margin-bottom: 0.5rem;">
+                        <span style="margin-right: 1rem;">
+                            <a href='#' @click.prevent='toggleUserItemList' style="text-decoration: none;">
+                                <span v-if="entry.on_user_item_list" tt_title="remove_from_favourites">
+                                    ♥️
+                                </span>
+                                <span v-else tt_title="add_to_favourites">
+                                    🤍
+                                </span>
+                            </a>
+                        </span>
                         {{entry.minutes}} min
                     </div>
                     <div style="display:flex; margin-bottom: 0.5rem;">
@@ -142,6 +152,15 @@ let EntryPage = Vue.extend ( {
         tt.updateInterface(this.$el) ;
     } ,
     methods : {
+        toggleUserItemList: function () {
+            this.entry.on_user_item_list = !this.entry.on_user_item_list;
+            fetch("./api.php?action=set_user_item_list&q="+this.item.getID()+"&state="+(this.entry.on_user_item_list?1:0))
+                .then(results => {
+                    results.json().then( j => {
+                        if ( j.status!='OK' ) alert(j.status);
+                    })
+                });
+        },
         associated_people_props: function () {
             return config.misc.associated_people_props;
         } ,

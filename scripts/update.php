@@ -26,6 +26,8 @@ if ( isset($argv[1]) and $argv[1]=='json' ) {
 	$ws->purge_items_without_files();
 } else if ( isset($argv[1]) and $argv[1]=='annotate_ia_movies' ) {
 	$ws->annotate_ia_movies();
+} else if ( isset($argv[1]) and $argv[1]=='import_commons_video_minutes' ) {
+	$ws->import_commons_video_minutes();
 } else if ( isset($argv[1]) and $argv[1]=='update_item_no_files' ) {
 	$ws->update_item_no_files();
 	$ws->update_item_no_files_search_results();
@@ -40,6 +42,7 @@ if ( isset($argv[1]) and $argv[1]=='json' ) {
 	$ws->remove_unused_people();
 	$ws->update_persons();
 	$ws->import_missing_section_labels();
+	$ws->import_commons_video_minutes();
 	$ws->generate_main_page_data();
 	print "Main page data generated\n";
 
