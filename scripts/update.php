@@ -18,7 +18,10 @@ if ( isset($argv[1]) and $argv[1]=='json' ) {
 	$ws->generate_main_page_data();
 } else if ( isset($argv[1]) and $argv[1]=='json2' ) {
 	$data = $ws->get_main_page_data(PHP_INT_MAX,PHP_INT_MAX);
-	print_r($data);
+	$data = json_encode($data);
+	$filename = __DIR__.'/../public_html/all.json';
+	file_put_contents($filename,$data);
+print_r($data);
 } else if ( isset($argv[1]) and $argv[1]=='test' ) {
 	print_r($ws->config);
 } else if ( isset($argv[1]) and $argv[1]=='person' ) {
