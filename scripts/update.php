@@ -21,7 +21,6 @@ if ( isset($argv[1]) and $argv[1]=='json' ) {
 	$data = json_encode($data);
 	$filename = __DIR__.'/../public_html/all.json';
 	file_put_contents($filename,$data);
-print_r($data);
 } else if ( isset($argv[1]) and $argv[1]=='test' ) {
 	print_r($ws->config);
 } else if ( isset($argv[1]) and $argv[1]=='person' ) {
