@@ -571,6 +571,13 @@ class WikiStream {
 		}
 	}
 
+	public function generate_all_data() {
+		$data = $this->get_main_page_data(PHP_INT_MAX,PHP_INT_MAX);
+		$data = json_encode($data);
+		$filename = __DIR__.'/../public_html/all.json';
+		file_put_contents($filename,$data);
+	}
+
 	public function generate_main_page_data() {
 		$out = $this->get_main_page_data();
 		$out = 'var config = ' . json_encode($out) . ';' ;

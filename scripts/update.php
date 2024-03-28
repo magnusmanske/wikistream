@@ -17,10 +17,7 @@ if ( isset($argv[1]) and $argv[1]=='reset' ) {
 if ( isset($argv[1]) and $argv[1]=='json' ) {
 	$ws->generate_main_page_data();
 } else if ( isset($argv[1]) and $argv[1]=='json2' ) {
-	$data = $ws->get_main_page_data(PHP_INT_MAX,PHP_INT_MAX);
-	$data = json_encode($data);
-	$filename = __DIR__.'/../public_html/all.json';
-	file_put_contents($filename,$data);
+	$ws->generate_all_data();
 } else if ( isset($argv[1]) and $argv[1]=='test' ) {
 	print_r($ws->config);
 } else if ( isset($argv[1]) and $argv[1]=='person' ) {
@@ -58,6 +55,8 @@ if ( isset($argv[1]) and $argv[1]=='json' ) {
 	# These edits will take too long to percolate into SPARQL to be useful now, so prepare for the next update
 	$ws->annotate_ia_movies();
 
+	# Might run out of memory so run this last
+	$ws->generate_all_data();
 }
 
 ?>
