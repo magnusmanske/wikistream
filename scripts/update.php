@@ -3,7 +3,7 @@
 
 error_reporting(E_ERROR|E_CORE_ERROR|E_ALL|E_COMPILE_ERROR);
 ini_set('display_errors', 'On');
-ini_set('memory_limit','500M');
+ini_set('memory_limit','1500M');
 
 require_once ( __DIR__.'/wikistream.php' ) ;
 
