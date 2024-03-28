@@ -432,7 +432,7 @@ class WikiStream {
 		return $ret;
 	}
 
-	public function get_main_page_data() {
+	public function get_main_page_data($max_movies_per_section=25,$max_sections=20) {
 		$out = [ 'status'=>'OK' ];
 		$out['sections'] = [];
 		$out['sections'][] = [
@@ -445,11 +445,15 @@ class WikiStream {
 		];
 		$out['sections'][] = [
 			'title_key' => "popular_entries",
-			'entries' => $this->get_item_view('vw_popular_entries',25)
+			'entries' => $this->get_item_view('vw_popular_entries',$max_movies_per_section)
 		];
 		$this->config->add_special_sections($this,$out);
 
-		$sections = $this->get_random_sections(20);
+		if ( $max_sections==PHP_INT_MAX) {
+			$sections = $this->get_top_sections($max_sections);
+		} else {
+			$sections = $this->get_random_sections($max_sections);
+		}
 		$qs = [] ;
 		foreach ( $sections AS $section ) $qs[] = $section->section_q;
 		$wil = new WikidataItemList();
