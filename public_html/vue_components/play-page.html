@@ -1,31 +1,89 @@
-<template id='play-template'>
-<div class='container-fluid'>
+<template id="play-template">
+  <div class="container-fluid">
     <page-header></page-header>
-    <div style="position: fixed; left:5%; right:5%; bottom:5%; top:4rem;">
-        <iframe v-if='source_prop==10||source_prop==51' :src="'https://commons.wikimedia.org/wiki/File:'+encodeURIComponent(source_key)+'?embedplayer=yes'" width="100%" height="100%" frameborder="0" allow="autoplay" webkitallowfullscreen="true" mozallowfullscreen="true" allowfullscreen></iframe>
-        <iframe v-else-if='source_prop==724' :src="'https://archive.org/embed/'+encodeURIComponent(source_key)" width="100%" height="100%" frameborder="0" allow="autoplay" webkitallowfullscreen="true" mozallowfullscreen="true" allowfullscreen></iframe>
-        <iframe v-else-if='source_prop==1651' :src="'https://www.youtube-nocookie.com/embed/'+encodeURIComponent(source_key)" width="100%" height="100%" frameborder="0" allow="autoplay; encrypted-media" webkitallowfullscreen="true" mozallowfullscreen="true" allowfullscreen></iframe>
-        <iframe v-else-if='source_prop==4015' :src="'https://player.vimeo.com/video/'+encodeURIComponent(source_key)+'?autoplay=1&loop=1&autopause=0'" width="100%" height="100%" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>
-        <div v-else tt='unknown_source'></div>
+    <div style="position: fixed; left: 5%; right: 5%; bottom: 5%; top: 4rem">
+      <iframe
+        v-if="source_prop==10||source_prop==51"
+        :src="'https://commons.wikimedia.org/wiki/File:'+encodeURIComponent(source_key)+'?embedplayer=yes'"
+        width="100%"
+        height="100%"
+        frameborder="0"
+        allow="autoplay"
+        webkitallowfullscreen="true"
+        mozallowfullscreen="true"
+        allowfullscreen
+      ></iframe>
+      <iframe
+        v-else-if="source_prop==724"
+        :src="'https://archive.org/embed/'+encodeURIComponent(source_key)"
+        width="100%"
+        height="100%"
+        frameborder="0"
+        allow="autoplay"
+        webkitallowfullscreen="true"
+        mozallowfullscreen="true"
+        allowfullscreen
+      ></iframe>
+      <iframe
+        v-else-if="source_prop==1651"
+        :src="'https://www.youtube-nocookie.com/embed/'+encodeURIComponent(source_key)"
+        width="100%"
+        height="100%"
+        frameborder="0"
+        allow="autoplay; encrypted-media"
+        webkitallowfullscreen="true"
+        mozallowfullscreen="true"
+        allowfullscreen
+      ></iframe>
+      <iframe
+        v-else-if="source_prop==4015"
+        :src="'https://player.vimeo.com/video/'+encodeURIComponent(source_key)+'?autoplay=1&loop=1&autopause=0'"
+        width="100%"
+        height="100%"
+        frameborder="0"
+        allow="autoplay; fullscreen"
+        allowfullscreen
+      ></iframe>
+      <!-- TODO on-page player -->
+      <a
+        v-else-if="source_prop==11731"
+        :href="'https://www.dailymotion.com/video/'+encodeURIComponent(source_key)"
+        >View on DailyMotion</a
+      >
+      <div v-else tt="unknown_source"></div>
     </div>
-
-</div>
+  </div>
 </template>
 
 <script>
-'use strict';
+  "use strict";
 
-let PlayPage = Vue.extend ( {
-    props : ['source_prop','source_key'] ,
-    data : function () { return {  } } ,
-    created : function () {
-        this.log("play_page_loaded")
-    } ,
-    updated : function () { tt.updateInterface(this.$el) ; } ,
-    mounted : function () { tt.updateInterface(this.$el) ; } ,
-    methods : {
-        log: function(event) { fetch("./api.php?action=log&event="+event+'&source_prop='+this.source_prop+'&source_key='+this.source_key).then(results => {}) }
-    } ,
-    template:'#play-template'
-} ) ;
+  let PlayPage = Vue.extend({
+    props: ["source_prop", "source_key"],
+    data: function () {
+      return {};
+    },
+    created: function () {
+      this.log("play_page_loaded");
+    },
+    updated: function () {
+      tt.updateInterface(this.$el);
+    },
+    mounted: function () {
+      tt.updateInterface(this.$el);
+    },
+    methods: {
+      log: function (event) {
+        fetch(
+          "./api.php?action=log&event=" +
+            event +
+            "&source_prop=" +
+            this.source_prop +
+            "&source_key=" +
+            this.source_key,
+        ).then((results) => {});
+      },
+    },
+    template: "#play-template",
+  });
 </script>

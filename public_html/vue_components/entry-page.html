@@ -1,216 +1,331 @@
 <style>
-div.entry-description {
+  div.entry-description {
     margin: 0.5rem;
-}
-span.fluc span.wd-link-as-text {
+  }
+  span.fluc span.wd-link-as-text {
     display: inline-block;
-}
-span.fluc span.wd-link-as-text:first-letter {
-    text-transform:uppercase;
-}
-div.play_button_legend {
-    opacity: .6;
+  }
+  span.fluc span.wd-link-as-text:first-letter {
+    text-transform: uppercase;
+  }
+  div.play_button_legend {
+    opacity: 0.6;
     color: white;
     text-align: center;
-}
+  }
 </style>
 
-<template id='entry-template'>
-<div class='container-fluid'>
+<template id="entry-template">
+  <div class="container-fluid">
     <page-header></page-header>
-    <div class="row" style="width:100%;">
-        <div v-if='loading'>
-            <i tt='loading'></i>
-        </div>
-        <div v-else-if='item==null||entry==null'>
-            <i tt="item_not_in_wikiflix"></i>
-        </div>
-        <div v-else style="width: 100%">
-            <div style="display:flex;">
-                <div style="margin-right:1rem;">
-                    <commons-thumbnail v-if='item.hasClaims("P3383")' :filename='item.getFirstStringForProperty("P3383")' width='260' height='400'></commons-thumbnail>
-                    <commons-thumbnail v-else-if='item.hasClaims("P18")' :filename='item.getFirstStringForProperty("P18")' width='260' height='400'></commons-thumbnail>
-                </div>
+    <div class="row" style="width: 100%">
+      <div v-if="loading">
+        <i tt="loading"></i>
+      </div>
+      <div v-else-if="item==null||entry==null">
+        <i tt="item_not_in_wikiflix"></i>
+      </div>
+      <div v-else style="width: 100%">
+        <div style="display: flex">
+          <div style="margin-right: 1rem">
+            <commons-thumbnail
+              v-if='item.hasClaims("P3383")'
+              :filename='item.getFirstStringForProperty("P3383")'
+              width="260"
+              height="400"
+            ></commons-thumbnail>
+            <commons-thumbnail
+              v-else-if='item.hasClaims("P18")'
+              :filename='item.getFirstStringForProperty("P18")'
+              width="260"
+              height="400"
+            ></commons-thumbnail>
+          </div>
+          <div>
+            <div style="display: flex; margin-bottom: 0.5rem">
+              <div
+                v-if='item.hasClaims("P154")'
+                style="background-color: white"
+              >
+                <commons-thumbnail
+                  :filename='item.getFirstStringForProperty("P154")'
+                  width="300"
+                  height="65"
+                  nolink="1"
+                ></commons-thumbnail>
+              </div>
+              <div v-else>
+                <h1>{{item.getLabel()}}</h1>
+              </div>
+              <div style="margin-left: 1rem">
+                <a :href="item.getURL()" class="wikidata" target="_blank">
+                  <img
+                    border="0"
+                    src="https://upload.wikimedia.org/wikipedia/commons/thumb/e/e4/Wikidata-logo_S.svg/32px-Wikidata-logo_S.svg.png"
+                  />
+                </a>
+              </div>
+            </div>
+            <div style="margin-bottom: 0.5rem">
+              <span
+                v-for="tag in tags"
+                :class="'badge badge-pill  badge-'+tag.level"
+                style="margin-right: 0.5rem"
+              >
+                <wd-link :item="tag.q" as_text="1"></wd-link>
+              </span>
+            </div>
+            <div style="margin-bottom: 0.5rem">
+              <span style="margin-right: 1rem">
+                <a
+                  href="#"
+                  @click.prevent="toggleUserItemList"
+                  style="text-decoration: none"
+                >
+                  <span
+                    v-if="entry.on_user_item_list"
+                    tt_title="remove_from_favourites"
+                  >
+                    ♥️
+                  </span>
+                  <span v-else tt_title="add_to_favourites"> 🤍 </span>
+                </a>
+              </span>
+              {{entry.minutes}} min
+            </div>
+            <div style="display: flex; margin-bottom: 0.5rem">
+              <div v-for="v in entry.entry_files" style="margin-right: 1rem">
                 <div>
-                    <div style="display:flex; margin-bottom: 0.5rem;">
-                        <div v-if='item.hasClaims("P154")' style="background-color:white;">
-                            <commons-thumbnail :filename='item.getFirstStringForProperty("P154")' width='300' height="65" nolink="1"></commons-thumbnail>
-                        </div>
-                        <div v-else>
-                            <h1>{{item.getLabel()}}</h1>
-                        </div>
-                        <div style="margin-left:1rem;">
-                            <a :href='item.getURL()' class='wikidata' target="_blank">
-                                <img border='0' src='https://upload.wikimedia.org/wikipedia/commons/thumb/e/e4/Wikidata-logo_S.svg/32px-Wikidata-logo_S.svg.png' />
-                            </a>
-                        </div>
-                    </div>
-                    <div style="margin-bottom: 0.5rem;">
-                        <span v-for="tag in tags" :class="'badge badge-pill  badge-'+tag.level" style="margin-right: 0.5rem;">
-                            <wd-link :item='tag.q' as_text='1'></wd-link>
-                        </span>
-                    </div>
-                    <div style="margin-bottom: 0.5rem;">
-                        <span style="margin-right: 1rem;">
-                            <a href='#' @click.prevent='toggleUserItemList' style="text-decoration: none;">
-                                <span v-if="entry.on_user_item_list" tt_title="remove_from_favourites">
-                                    ♥️
-                                </span>
-                                <span v-else tt_title="add_to_favourites">
-                                    🤍
-                                </span>
-                            </a>
-                        </span>
-                        {{entry.minutes}} min
-                    </div>
-                    <div style="display:flex; margin-bottom: 0.5rem;">
-                        <div v-for="v in entry.entry_files" style="margin-right:1rem;">
-                            <div>
-                                <router-link type="button" class="btn btn-outline-light btn-lg" :to="'/play/'+v.property+'/'+v.key" :title="v.key" style="height:54px;">
-                                    ▶ <span v-if='v.is_trailer' tt="play_trailer"></span>
-                                    <span v-else tt="play"></span>
-                                    <img v-if='v.property==10' src='https://upload.wikimedia.org/wikipedia/commons/thumb/4/4a/Commons-logo.svg/24px-Commons-logo.svg.png' />
-                                    <img v-if='v.property==724' src='https://upload.wikimedia.org/wikipedia/commons/thumb/5/51/Internet_Archive_Logo.svg/32px-Internet_Archive_Logo.svg.png' />
-                                    <img v-if='v.property==1651' src='https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/32px-YouTube_full-color_icon_%282017%29.svg.png' />
-                                    <img v-if='v.property==4015' src='https://upload.wikimedia.org/wikipedia/commons/thumb/f/f1/Vimeo_icon_block.png/32px-Vimeo_icon_block.png' />
-                                </router-link>
-                                <div v-if='v.minutes!=null' class="play_button_legend">[{{v.minutes}} min]</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div v-for="person_prop in associated_people_props()">
-                        <div v-if='item.hasClaims("P"+person_prop)' style="display:flex; margin-bottom: 0.5rem;">
-                            <span><wd-link :item='"P"+person_prop' as_text='1' class="fluc"></wd-link></span>
-                            <span v-for='q in item.getTargets("P"+person_prop)' style='margin-left: 0.5rem;'>
-                                <router-link :to='"/person/"+q.replace(/\D/g,"")'>
-                                    <wd-link :item='q' as_text='1'></wd-link>
-                                </router-link>
-                            </span>
-                        </div>
-                    </div>
-                    <div v-if='description!=""' class="entry-description">
-                        {{description}}
-                    </div>
-                    <div> <!-- Social -->
-                        <mastodon-button :message="social('message')" :target="social('url')"></mastodon-button>
-                    </div>
+                  <router-link
+                    type="button"
+                    class="btn btn-outline-light btn-lg"
+                    :to="'/play/'+v.property+'/'+v.key"
+                    :title="v.key"
+                    style="height: 54px"
+                  >
+                    ▶
+                    <span v-if="v.is_trailer" tt="play_trailer"></span>
+                    <span v-else tt="play"></span>
+                    <img
+                      v-if="v.property==10"
+                      src="https://upload.wikimedia.org/wikipedia/commons/thumb/4/4a/Commons-logo.svg/24px-Commons-logo.svg.png"
+                    />
+                    <img
+                      v-if="v.property==724"
+                      src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/51/Internet_Archive_Logo.svg/32px-Internet_Archive_Logo.svg.png"
+                    />
+                    <img
+                      v-if="v.property==1651"
+                      src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/32px-YouTube_full-color_icon_%282017%29.svg.png"
+                    />
+                    <img
+                      v-if="v.property==4015"
+                      src="https://upload.wikimedia.org/wikipedia/commons/thumb/f/f1/Vimeo_icon_block.png/32px-Vimeo_icon_block.png"
+                    />
+                    <img
+                      v-if="v.property==11731"
+                      src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/aa/Dailymotion_Wordmark_(2020).svg/64px-Dailymotion_Wordmark_(2020).svg.png"
+                    />
+                  </router-link>
+                  <div v-if="v.minutes!=null" class="play_button_legend">
+                    [{{v.minutes}} min]
+                  </div>
                 </div>
+              </div>
             </div>
-            <div v-if='cast.length>0' style="clear:both; margin-bottom: 0.5rem; margin-top: 0.5rem; width: 100%;">
-                <h2 tt='performers'></h2>
-                <div style="display:flex; flex-wrap: wrap;">
-                    <person-thumb v-for="cm in cast" :person='cm'></person-thumb>
-                </div>
+            <div v-for="person_prop in associated_people_props()">
+              <div
+                v-if='item.hasClaims("P"+person_prop)'
+                style="display: flex; margin-bottom: 0.5rem"
+              >
+                <span
+                  ><wd-link
+                    :item='"P"+person_prop'
+                    as_text="1"
+                    class="fluc"
+                  ></wd-link
+                ></span>
+                <span
+                  v-for='q in item.getTargets("P"+person_prop)'
+                  style="margin-left: 0.5rem"
+                >
+                  <router-link :to='"/person/"+q.replace(/\D/g,"")'>
+                    <wd-link :item="q" as_text="1"></wd-link>
+                  </router-link>
+                </span>
+              </div>
             </div>
-            <div style="width: 100%;">
-                <section-row v-for='section in entry.sections' :section="section"></section-row>
+            <div v-if='description!=""' class="entry-description">
+              {{description}}
             </div>
+            <div>
+              <!-- Social -->
+              <mastodon-button
+                :message="social('message')"
+                :target="social('url')"
+              ></mastodon-button>
+            </div>
+          </div>
         </div>
+        <div
+          v-if="cast.length>0"
+          style="
+            clear: both;
+            margin-bottom: 0.5rem;
+            margin-top: 0.5rem;
+            width: 100%;
+          "
+        >
+          <h2 tt="performers"></h2>
+          <div style="display: flex; flex-wrap: wrap">
+            <person-thumb v-for="cm in cast" :person="cm"></person-thumb>
+          </div>
+        </div>
+        <div style="width: 100%">
+          <section-row
+            v-for="section in entry.sections"
+            :section="section"
+          ></section-row>
+        </div>
+      </div>
     </div>
-
-</div>
+  </div>
 </template>
 
 <script>
-'use strict';
+  "use strict";
 
-let EntryPage = Vue.extend ( {
-    props : ['q'] ,
-    mixins : [wikipediaDescriptionMixin],
-    data : function () { return { loading:true,item:{},entry:{},cast:[],tags:[],description:'',
-        tag_levels:{
-            danger:['Q698752','Q47131','Q8463'],
-            warning:['Q3587621','Q880808'],
-        }
-     } } ,
-    created : function () {
+  let EntryPage = Vue.extend({
+    props: ["q"],
+    mixins: [wikipediaDescriptionMixin],
+    data: function () {
+      return {
+        loading: true,
+        item: {},
+        entry: {},
+        cast: [],
+        tags: [],
+        description: "",
+        tag_levels: {
+          danger: ["Q698752", "Q47131", "Q8463"],
+          warning: ["Q3587621", "Q880808"],
+        },
+      };
+    },
+    created: function () {
+      let self = this;
+      let entry_q = "Q" + self.q;
+      self.log("entry_loaded");
+      fetch("./api.php?action=get_entry&q=" + self.q).then((results) => {
+        results.json().then((j) => {
+          self.entry = j.data;
+          wd.getItemBatch([entry_q], function () {
+            self.item = wd.getItem(entry_q);
+            if (self.item != null && self.entry != null) {
+              self.load_description(entry_q, "en", function (desc) {
+                if (typeof desc != "undefined" && desc != "")
+                  self.description = desc;
+              });
+              self.add_cast();
+              self.add_tags();
+            }
+            self.loading = false;
+          });
+        });
+      });
+    },
+    updated: function () {
+      tt.updateInterface(this.$el);
+    },
+    mounted: function () {
+      tt.updateInterface(this.$el);
+    },
+    methods: {
+      toggleUserItemList: function () {
+        this.entry.on_user_item_list = !this.entry.on_user_item_list;
+        fetch(
+          "./api.php?action=set_user_item_list&q=" +
+            this.item.getID() +
+            "&state=" +
+            (this.entry.on_user_item_list ? 1 : 0),
+        ).then((results) => {
+          results.json().then((j) => {
+            if (j.status != "OK") alert(j.status);
+          });
+        });
+      },
+      associated_people_props: function () {
+        return config.misc.associated_people_props;
+      },
+      social: function (key) {
+        let label = this.item.getFirstStringForProperty("P154");
+        if (label == "") label = this.item.getLabel();
+        if (key == "message")
+          return tt.t("mastodon_message").replace(/\$1/, label);
+        if (key == "url")
+          return "https://" + window.location.host + "/#/entry/" + this.q;
+      },
+      add_tags: function () {
         let self = this;
-        let entry_q = 'Q'+self.q;
-        self.log('entry_loaded');
-        fetch("./api.php?action=get_entry&q="+self.q)
-        .then(results => {
-            results.json().then( j => {
-                self.entry=j.data;
-                wd.getItemBatch([entry_q],function(){
-                    self.item = wd.getItem(entry_q);
-                    if ( self.item!=null && self.entry!=null ) {
-                        self.load_description(entry_q,'en',function(desc){
-                            if ( typeof desc!='undefined' && desc!='' ) self.description = desc;
-                        });
-                        self.add_cast();
-                        self.add_tags();
-                    }
-                    self.loading = false;
-                })
-            });
-        })
-    } ,
-    updated : function () {
-        tt.updateInterface(this.$el) ;
-    } ,
-    mounted : function () {
-        tt.updateInterface(this.$el) ;
-    } ,
-    methods : {
-        toggleUserItemList: function () {
-            this.entry.on_user_item_list = !this.entry.on_user_item_list;
-            fetch("./api.php?action=set_user_item_list&q="+this.item.getID()+"&state="+(this.entry.on_user_item_list?1:0))
-                .then(results => {
-                    results.json().then( j => {
-                        if ( j.status!='OK' ) alert(j.status);
-                    })
-                });
-        },
-        associated_people_props: function () {
-            return config.misc.associated_people_props;
-        } ,
-        social: function ( key ) {
-            let label = this.item.getFirstStringForProperty("P154");
-            if ( label=='' ) label = this.item.getLabel();
-            if ( key=='message' ) return tt.t("mastodon_message").replace(/\$1/,label);
-            if ( key=='url' ) return 'https://'+window.location.host+'/#/entry/'+this.q;
-        },
-        add_tags: function () {
-            let self = this ;
-            self.item.getClaimsForProperty("P180").forEach( (c) => {
-                let tag = { level:'light' };
-                tag.q = self.item.getClaimTargetItemID(c);
-                for (const [level, items] of Object.entries(self.tag_levels)) {
-                    if ( items.includes(tag.q) ) tag.level = level;
-                };
-                self.tags.push(tag);
-            });
-            self.item.getClaimsForProperty("P5021").forEach( (c) => {
-                if ( self.item.getClaimTargetItemID(c)=='Q4165246' ) {
-                    if ( typeof c.qualifiers.P9259!='undefined' ) {
-                        c.qualifiers.P9259.forEach((qual) => {
-                            if ( qual.datavalue.value.id=="Q105773168" ) self.tags.push({ level:'success' , q:'Q4165246' });
-                            if ( qual.datavalue.value.id=="Q105773155" ) self.tags.push({ level:'danger' , q:'Q4165246' });
-                            if ( qual.datavalue.value.id=="Q105729336" ) self.tags.push({ level:'light' , q:'Q4165246' });
-                        })
-                    }
-                }
-            } ) ;
-        },
-        add_cast: function () {
-            let self = this ;
-            let performer_prop = config.misc.performer_prop;
-            self.item.getClaimsForProperty(performer_prop).forEach( (c) => {
-                let person_q = self.item.getClaimTargetItemID(c);
-                if ( typeof self.entry.people[performer_prop]!='undefined' ) {
-                    if ( typeof self.entry.people[performer_prop][person_q]!='undefined' ) {
-                        let cm = JSON.parse(JSON.stringify(self.entry.people[performer_prop][person_q]));
-                        $.each ( (c.qualifiers||[]) , function ( qp , qv ) {
-                            // TODO character role
-                            if ( qp=='P4633') cm.as = qv[0].datavalue.value;
-                        });
-                        self.cast.push(cm);
-                    }
-                }
-            });
-        },
-        log: function(event) { fetch("./api.php?action=log&event="+event+'&q='+this.q).then(results => {}) }
-    } ,
-    template:'#entry-template'
-} ) ;
+        self.item.getClaimsForProperty("P180").forEach((c) => {
+          let tag = { level: "light" };
+          tag.q = self.item.getClaimTargetItemID(c);
+          for (const [level, items] of Object.entries(self.tag_levels)) {
+            if (items.includes(tag.q)) tag.level = level;
+          }
+          self.tags.push(tag);
+        });
+        self.item.getClaimsForProperty("P5021").forEach((c) => {
+          if (self.item.getClaimTargetItemID(c) == "Q4165246") {
+            if (typeof c.qualifiers.P9259 != "undefined") {
+              c.qualifiers.P9259.forEach((qual) => {
+                if (qual.datavalue.value.id == "Q105773168")
+                  self.tags.push({
+                    level: "success",
+                    q: "Q4165246",
+                  });
+                if (qual.datavalue.value.id == "Q105773155")
+                  self.tags.push({
+                    level: "danger",
+                    q: "Q4165246",
+                  });
+                if (qual.datavalue.value.id == "Q105729336")
+                  self.tags.push({
+                    level: "light",
+                    q: "Q4165246",
+                  });
+              });
+            }
+          }
+        });
+      },
+      add_cast: function () {
+        let self = this;
+        let performer_prop = config.misc.performer_prop;
+        self.item.getClaimsForProperty(performer_prop).forEach((c) => {
+          let person_q = self.item.getClaimTargetItemID(c);
+          if (typeof self.entry.people[performer_prop] != "undefined") {
+            if (
+              typeof self.entry.people[performer_prop][person_q] != "undefined"
+            ) {
+              let cm = JSON.parse(
+                JSON.stringify(self.entry.people[performer_prop][person_q]),
+              );
+              $.each(c.qualifiers || [], function (qp, qv) {
+                // TODO character role
+                if (qp == "P4633") cm.as = qv[0].datavalue.value;
+              });
+              self.cast.push(cm);
+            }
+          }
+        });
+      },
+      log: function (event) {
+        fetch("./api.php?action=log&event=" + event + "&q=" + this.q).then(
+          (results) => {},
+        );
+      },
+    },
+    template: "#entry-template",
+  });
 </script>
