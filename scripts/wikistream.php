@@ -1136,7 +1136,7 @@ class WikiStream
 					  FILTER(?hasMedia=false)
 					  OPTIONAL { ?q wdt:P577 ?date }
 					  OPTIONAL { ?q wdt:P2047 ?duration }
-					SERVICE wikibase:label { bd:serviceParam wikibase:language \"[AUTO_LANGUAGE],en,fr,it,de\". }
+					SERVICE wikibase:label { bd:serviceParam wikibase:language \"[AUTO_LANGUAGE],en,fr,it,de,mul\". }
 		}";
 		$to_insert = [];
 		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
