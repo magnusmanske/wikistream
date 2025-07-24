@@ -231,7 +231,7 @@ class WikiStream
 				preg_match(
 					"|^\+(\d{4})|",
 					$c->mainsnak->datavalue->value->time,
-					$m
+					$m,
 				)
 			) {
 				$years[] = $m[1] * 1;
@@ -249,7 +249,7 @@ class WikiStream
 		$item_q_numeric,
 		&$qs,
 		&$sections,
-		&$entry_files
+		&$entry_files,
 	) {
 		$item = $wil->getItem($item_q_numeric);
 		if (!isset($item)) {
@@ -261,7 +261,7 @@ class WikiStream
 			array_merge(
 				$this->config->misc_section_props,
 				$this->config->people_props,
-				$this->config->grouping_props
+				$this->config->grouping_props,
 			)
 			as $prop
 		) {
@@ -384,7 +384,7 @@ class WikiStream
 					$q_numeric,
 					$qs,
 					$sections,
-					$entry_files
+					$entry_files,
 				);
 			} catch (Exception $e) {
 				// print "Filtered out {$q_numeric} for bad genre\n";
@@ -504,7 +504,7 @@ class WikiStream
 		return $this->get_item_view(
 			"vw_ranked_entries_blacklist",
 			$num,
-			$section_q
+			$section_q,
 		);
 	}
 
@@ -512,7 +512,7 @@ class WikiStream
 		$view_name,
 		$num = 25,
 		$section_q = null,
-		$subquery = null
+		$subquery = null,
 	) {
 		$ret = [];
 		$sql = "SELECT * FROM `{$view_name}` WHERE 1=1";
@@ -594,7 +594,7 @@ class WikiStream
 	public function get_top_sections(
 		$num = 20,
 		$properties = [],
-		$skip_section_q = null
+		$skip_section_q = null,
 	) {
 		if ($skip_section_q == null) {
 			$skip_section_q = $this->config->skip_section_q;
@@ -604,7 +604,7 @@ class WikiStream
 		}
 		$skip_section_q = array_merge(
 			$skip_section_q,
-			$this->config->bad_genres
+			$this->config->bad_genres,
 		);
 		$ret = [];
 		$sql =
@@ -623,7 +623,7 @@ class WikiStream
 	public function get_random_sections(
 		$num = 20,
 		$properties = [],
-		$skip_section_q = null
+		$skip_section_q = null,
 	) {
 		if ($skip_section_q == null) {
 			$skip_section_q = $this->config->skip_section_q;
@@ -634,7 +634,7 @@ class WikiStream
 		}
 		$skip_section_q = array_merge(
 			$skip_section_q,
-			$this->config->bad_genres
+			$this->config->bad_genres,
 		);
 		$ret = [];
 		$sql =
@@ -669,7 +669,7 @@ class WikiStream
 
 	public function get_main_page_data(
 		$max_movies_per_section = 25,
-		$max_sections = 20
+		$max_sections = 20,
 	) {
 		$out = ["status" => "OK"];
 		$out["sections"] = [];
@@ -685,7 +685,7 @@ class WikiStream
 			"title_key" => "popular_entries",
 			"entries" => $this->get_item_view(
 				"vw_popular_entries",
-				$max_movies_per_section
+				$max_movies_per_section,
 			),
 		];
 		$this->config->add_special_sections($this, $out);
@@ -896,7 +896,7 @@ class WikiStream
 		$existing_item_qs = $this->get_items_in_db();
 		$wt = $this->tfc->getWikiPageText(
 			"wikidatawiki",
-			$this->config->whitelist_page
+			$this->config->whitelist_page,
 		);
 		$rows = explode("\n", $wt);
 		foreach ($rows as $row) {
@@ -933,7 +933,7 @@ class WikiStream
 		$qs = [];
 		$wt = $this->tfc->getWikiPageText(
 			"wikidatawiki",
-			$this->config->blacklist_page
+			$this->config->blacklist_page,
 		);
 		$rows = explode("\n", $wt);
 		foreach ($rows as $row) {
@@ -997,7 +997,7 @@ class WikiStream
 				preg_match(
 					"/(\d+[.0-9]*) *(min|minute|minutes|min\.)/i",
 					$s,
-					$m
+					$m,
 				)
 			) {
 				$seconds = $m[1] * 60;
@@ -1126,6 +1126,7 @@ class WikiStream
 					  ?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P6216 wd:Q19652 ; wikibase:sitelinks ?sitelinks .
 					  MINUS { ?q wdt:P31 wd:Q97570383 } # Glass positive
 					  MINUS { ?q wdt:P793 wd:Q1268687 } # Lost film
+					  MINUS { ?q wdt:P12020 wd:Q122238711 } # Lost film
 					  OPTIONAL { ?q wdt:P724 ?ia }
 					  OPTIONAL { ?q wdt:P10 ?commons }
 					  OPTIONAL { ?q wdt:P1651 ?youtube }
@@ -1256,7 +1257,7 @@ class WikiStream
 			"vw_ranked_entries",
 			PHP_INT_MAX,
 			null,
-			"SELECT q FROM item WHERE year={$year}"
+			"SELECT q FROM item WHERE year={$year}",
 		);
 	}
 
