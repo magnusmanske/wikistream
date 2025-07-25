@@ -1272,7 +1272,7 @@ class WikiStream
 		$ret = [];
 		$limit *= 1;
 		$offset *= 1;
-		$sql = "SELECT * FROM `item_no_files` WHERE `ia_results` IS NOT null AND `commons_results` is not null ORDER BY `sites` DESC LIMIT {$limit} OFFSET {$offset}";
+		$sql = "SELECT * FROM `item_no_files` /*WHERE `ia_results` IS NOT null AND `commons_results` is not null*/ ORDER BY `sites` DESC LIMIT {$limit} OFFSET {$offset}";
 		$result = $this->tfc->getSQL($this->db, $sql);
 		while ($o = $result->fetch_object()) {
 			$ret[] = $o;

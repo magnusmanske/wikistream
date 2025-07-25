@@ -47,13 +47,13 @@
                                 </td>
                                 <td nowrap>
                                     <a class='btn btn-outline-primary' :href='"https://archive.org/details/movies?query="+getLabelYear(c)' target='_blank' tt="search"></a>
-                                    <span v-if='typeof c.ia_results=="undefined"'>?</span>
+                                    <span v-if='c.ia_results===null || typeof c.ia_results=="undefined"'>?</span>
                                     <span v-else-if='c.ia_results==0' style="color:red;" tt_title="has_no_search_results">&times;</span>
                                     <span v-else style="color: green;" tt_title="has_search_results">✓</span>
                                 </td>
                                 <td nowrap>
                                     <a class='btn btn-outline-primary' :href='"https://commons.wikimedia.org/w/index.php?type=video&title=Special:MediaSearch&go=Go&search="+getLabelYear(c)' target='_blank' tt="search"></a>
-                                    <span v-if='typeof c.commons_results=="undefined"'>?</span>
+                                    <span v-if='c.commons_results===null || typeof c.commons_results=="undefined"'>?</span>
                                     <span v-else-if='c.commons_results==0' style="color:red;" tt_title="has_no_search_results">&times;</span>
                                     <span v-else style="color: green;" tt_title="has_search_results">✓</span>
                                 </td>
