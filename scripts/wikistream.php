@@ -1233,7 +1233,7 @@ class WikiStream
 
 		# Internet Archive
 		if (true) {
-			$sql = "SELECT * FROM `item_no_files` WHERE `ia_results` IS NULL";
+			$sql = "SELECT * FROM `item_no_files` WHERE `ia_results` IS NULL LIMIT 100";
 			$result = $this->tfc->getSQL($this->db, $sql);
 			while ($o = $result->fetch_object()) {
 				if ( trim($o->title)=='' ) continue;
@@ -1248,7 +1248,7 @@ class WikiStream
 		# Commons
 		if (true) {
 			$sql =
-				"SELECT * FROM `item_no_files` WHERE `commons_results` IS NULL";
+				"SELECT * FROM `item_no_files` WHERE `commons_results` IS NULL LIMIT 100";
 			$result = $this->tfc->getSQL($this->db, $sql);
 			while ($o = $result->fetch_object()) {
 				$query = "filetype:video \"{$o->title}\"";
