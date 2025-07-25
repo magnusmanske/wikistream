@@ -1179,6 +1179,53 @@ class WikiStream
 		return $j;
 	}
 
+	function search_internet_archive_via_imdb($q_numeric) {
+		$ret = [];
+		$q = "Q{$q_numeric}";
+		$wil = new WikidataItemList();
+		$wil->loadItems([$q]);
+		$item = $wil->getItem($q);
+		if ( isset($item) ) {
+			foreach ($item->getClaims("P345") as $c) {
+				if ($c->rank == "deprecated") {
+					continue;
+				}
+				if (
+					!isset($c) or
+					!isset($c->mainsnak) or
+					!isset($c->mainsnak->datavalue)
+				) {
+					continue;
+				}
+				$imdb_id = $c->mainsnak->datavalue->value;
+				$query = "external-identifier:\"urn:imdb:{$imdb_id}\"";
+				$url =
+					"https://archive.org/services/search/beta/page_production/?service_backend=metadata&user_query=" .
+					urlencode($query) .
+					"&page_type=collection_details&page_target=movies&hits_per_page=50&page=0";
+				$j = $this->get_json_from_url($url);
+				foreach ( $j->response->body->hits->hits as $hit ) {
+					$ret[] = $hit->fields->identifier;
+				}
+			}
+		}
+		return $ret;
+	}
+
+	function search_internet_archive_via_title_and_year($o) {
+		$query = "\"{$o->title}\"";
+		if (isset($o->year)) {
+			$query .= " {$o->year}";
+		}
+		$url =
+			"https://archive.org/services/search/beta/page_production/?service_backend=metadata&user_query=" .
+			urlencode($query) .
+			"&page_type=collection_details&page_target=movies&hits_per_page=50&page=0";
+		$j = $this->get_json_from_url($url);
+		$hits = $j->response->body->hits->total * 1;
+		return $hits;
+	}
+
 	public function update_item_no_files_search_results()
 	{
 		$userAgent =
@@ -1189,23 +1236,16 @@ class WikiStream
 			$sql = "SELECT * FROM `item_no_files` WHERE `ia_results` IS NULL";
 			$result = $this->tfc->getSQL($this->db, $sql);
 			while ($o = $result->fetch_object()) {
-				$query = $o->title;
-				if (isset($o->year)) {
-					$query .= " {$o->year}";
-				}
-				$url =
-					"https://archive.org/services/search/beta/page_production/?service_backend=metadata&user_query=" .
-					urlencode($query) .
-					"&page_type=collection_details&page_target=movies&hits_per_page=50&page=0";
-				$j = $this->get_json_from_url($url);
-				$hits = $j->response->body->hits->total * 1;
+				if ( trim($o->title)=='' ) continue;
+				$hits = count($this->search_internet_archive_via_imdb($o->q));
+				if ( $hits==0 ) $hits = $this->search_internet_archive_via_title_and_year($o);
 				$sql = "UPDATE `item_no_files` SET `ia_results`={$hits} WHERE `q`={$o->q}";
 				$this->tfc->getSQL($this->db, $sql);
 				sleep(2);
 			}
 		}
 
-		# Commons TODO
+		# Commons
 		if (true) {
 			$sql =
 				"SELECT * FROM `item_no_files` WHERE `commons_results` IS NULL";
