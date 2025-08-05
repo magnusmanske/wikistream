@@ -31,7 +31,7 @@ if ( isset($argv[1]) and $argv[1]=='json' ) {
 } else if ( isset($argv[1]) and $argv[1]=='import_commons_video_minutes' ) {
 	$ws->import_commons_video_minutes();
 } else if ( isset($argv[1]) and $argv[1]=='update_item_no_files' ) {
-	$ws->update_item_no_files();
+	// $ws->update_item_no_files();
 	$ws->update_item_no_files_search_results();
 } else {
 	$ws->update_from_sparql();

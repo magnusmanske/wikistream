@@ -64,8 +64,59 @@ CREATE TABLE `section` (
 
 CREATE VIEW `vw_file` AS select `file`.`item_q` AS `item_q`,concat('[',group_concat(json_object('property',`file`.`property`,'key',`file`.`key`,'is_trailer',`file`.`is_trailer`) separator ','),']') AS `j` from `file` group by `file`.`item_q`;
 
-CREATE VIEW `vw_ranked_entries` AS select `item`.`q` AS `q`,`item`.`title` AS `title`,`item`.`available` AS `available`,`item`.`year` AS `year`,`item`.`minutes` AS `minutes`,`item`.`image` AS `image`,`item`.`sites` AS `sites`,`item`.`ts` AS `ts`,`vw_file`.`j` AS `files` from (`item` join `vw_file`) where `vw_file`.`item_q` = `item`.`q` order by `item`.`sites` desc,`item`.`minutes` desc,`item`.`q`;
+CREATE ALGORITHM=UNDEFINED DEFINER=`s55714`@`%` SQL SECURITY DEFINER VIEW `vw_ranked_entries`
+AS SELECT
+   `item`.`q` AS `q`,
+   `item`.`title` AS `title`,
+   `item`.`available` AS `available`,
+   `item`.`year` AS `year`,
+   `item`.`minutes` AS `minutes`,
+   `item`.`image` AS `image`,
+   `item`.`sites` AS `sites`,
+   `item`.`ts` AS `ts`,
+   `item`.`ts_added` AS `ts_added`,
+   `vw_file`.`j` AS `files`,(select count(0)
+FROM `section` where `section`.`property` = 136 and `section`.`section_q` = 226730 and `section`.`item_q` = `item`.`q`) AS `is_silent` from (`item` join `vw_file`) where `vw_file`.`item_q` = `item`.`q` order by `item`.`sites` desc,`item`.`minutes` desc,`item`.`q`;
 
-CREATE VIEW `vw_recently_added` AS select `item`.`q` AS `q`,`item`.`title` AS `title`,`item`.`available` AS `available`,`item`.`year` AS `year`,`item`.`minutes` AS `minutes`,`item`.`image` AS `image`,`item`.`sites` AS `sites`,`item`.`ts` AS `ts`,`vw_file`.`j` AS `files` from (`item` join `vw_file`) where `vw_file`.`item_q` = `item`.`q` order by `item`.`ts` desc,`item`.`minutes` desc,`item`.`q`;
+CREATE ALGORITHM=UNDEFINED DEFINER=`s55714`@`%` SQL SECURITY DEFINER VIEW `vw_ranked_entries_blacklist`
+AS SELECT
+   `vw_ranked_entries`.`q` AS `q`,
+   `vw_ranked_entries`.`title` AS `title`,
+   `vw_ranked_entries`.`available` AS `available`,
+   `vw_ranked_entries`.`year` AS `year`,
+   `vw_ranked_entries`.`minutes` AS `minutes`,
+   `vw_ranked_entries`.`image` AS `image`,
+   `vw_ranked_entries`.`sites` AS `sites`,
+   `vw_ranked_entries`.`ts` AS `ts`,
+   `vw_ranked_entries`.`ts_added` AS `ts_added`,
+   `vw_ranked_entries`.`files` AS `files`,(select count(0)
+FROM `section` where `section`.`property` = 136 and `section`.`section_q` = 226730 and `section`.`item_q` = `vw_ranked_entries`.`q`) AS `is_silent` from `vw_ranked_entries` where !(`vw_ranked_entries`.`q` in (select `blacklist`.`q` from `blacklist`)) order by `vw_ranked_entries`.`sites` desc,`vw_ranked_entries`.`minutes` desc,`vw_ranked_entries`.`q`;
+
+CREATE ALGORITHM=UNDEFINED DEFINER=`s55714`@`%` SQL SECURITY DEFINER VIEW `vw_recently_added`
+AS SELECT
+   `item`.`q` AS `q`,
+   `item`.`title` AS `title`,
+   `item`.`available` AS `available`,
+   `item`.`year` AS `year`,
+   `item`.`minutes` AS `minutes`,
+   `item`.`image` AS `image`,
+   `item`.`sites` AS `sites`,
+   `item`.`ts` AS `ts`,
+   `vw_file`.`j` AS `files`,(select count(0)
+FROM `section` where `section`.`property` = 136 and `section`.`section_q` = 226730 and `section`.`item_q` = `item`.`q`) AS `is_silent` from (`item` join `vw_file`) where `vw_file`.`item_q` = `item`.`q` order by `item`.`ts` desc,`item`.`minutes` desc,`item`.`q`;
 
 CREATE VIEW `vw_section_property_q` AS select `section`.`property` AS `property`,`section`.`section_q` AS `section_q`,count(item_q) AS `cnt` from `section` group by `section`.`property`,`section`.`section_q` order by count(0) desc;
+
+CREATE ALGORITHM=UNDEFINED DEFINER=`s55714`@`%` SQL SECURITY DEFINER VIEW `vw_popular_entries`
+AS SELECT
+   `vw_ranked_entries_blacklist`.`q` AS `q`,
+   `vw_ranked_entries_blacklist`.`title` AS `title`,
+   `vw_ranked_entries_blacklist`.`available` AS `available`,
+   `vw_ranked_entries_blacklist`.`year` AS `year`,
+   `vw_ranked_entries_blacklist`.`minutes` AS `minutes`,
+   `vw_ranked_entries_blacklist`.`image` AS `image`,
+   `vw_ranked_entries_blacklist`.`sites` AS `sites`,
+   `vw_ranked_entries_blacklist`.`ts` AS `ts`,
+   `vw_ranked_entries_blacklist`.`files` AS `files`,(select count(0)
+FROM `section` where `section`.`property` = 136 and `section`.`section_q` = 226730 and `section`.`item_q` = `vw_most_popular_items_played`.`q`) AS `is_silent` from (`vw_most_popular_items_played` join `vw_ranked_entries_blacklist`) where `vw_most_popular_items_played`.`q` = `vw_ranked_entries_blacklist`.`q` order by `vw_most_popular_items_played`.`cnt` desc,`vw_most_popular_items_played`.`q`;
+

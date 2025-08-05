@@ -107,7 +107,10 @@
         </router-link>
         <div class="legend">
             {{entry.title}}
-            <div v-if='entry.minutes!=null || entry.year!=null'>[<span v-if='entry.year!=null'>{{entry.year}}</span><span v-if='entry.minutes!=null && entry.year!=null'>;&nbsp;</span><span v-if='entry.minutes!=null'>{{entry.minutes}} min</span>]</div>
+            <div>
+                <div v-if='entry.minutes!=null || entry.year!=null' style='display:inline;'>[<span v-if='entry.year!=null'>{{entry.year}}</span><span v-if='entry.minutes!=null && entry.year!=null'>;&nbsp;</span><span v-if='entry.minutes!=null'>{{entry.minutes}} min</span>]</div>
+                <div v-if='(entry.is_silent??0)*1==1' style='display:inline;' tt_title='silent_movie'>🔇</div>
+            </div>
         </div>
     </div>
 </div>

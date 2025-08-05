@@ -249,7 +249,7 @@ class WikiStream
 		$item_q_numeric,
 		&$qs,
 		&$sections,
-		&$entry_files,
+		&$entry_files
 	) {
 		$item = $wil->getItem($item_q_numeric);
 		if (!isset($item)) {
