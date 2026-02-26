@@ -96,7 +96,7 @@ class WikiStream
 		foreach ($sections as $section) {
 			$item = $wil->getItem($section->section_q);
 			if (!isset($item)) {
-				return;
+				continue;
 			}
 			$s = $this->populate_section($section, $item);
 			if (isset($s) and $s != null) {
