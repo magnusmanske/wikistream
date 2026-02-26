@@ -34,7 +34,7 @@ class WikiStream
 		$this->httpClient = $httpClient ?? new CurlHttpClient();
 	}
 
-	public function getPerson($q, $add_files = true)
+	public function getPerson($q, $add_files = true): object
 	{
 		$ret = (object) ["q" => $q, "entries" => []];
 		$q *= 1;
@@ -78,7 +78,7 @@ class WikiStream
 		return $people;
 	}
 
-	public function getEntry($q)
+	public function getEntry($q): ?object
 	{
 		$ret = (object) [];
 		$q *= 1;
@@ -87,7 +87,7 @@ class WikiStream
 		if ($o = $result->fetch_object()) {
 			$ret = $o;
 		} else {
-			return;
+			return null;
 		} // Nothing
 
 		$o->entry_files = json_decode($o->files);
@@ -148,7 +148,7 @@ class WikiStream
 		return $ret;
 	}
 
-	protected function get_items_in_db()
+	protected function get_items_in_db(): array
 	{
 		$ret = [];
 		$sql = "SELECT `q` FROM `item`";
@@ -159,7 +159,7 @@ class WikiStream
 		return $ret;
 	}
 
-	public function import_commons_video_minutes()
+	public function import_commons_video_minutes(): void
 	{
 		$sql = "SELECT * FROM `file` WHERE `property`=10 AND `minutes` IS NULL";
 		$result = $this->tfc->getSQL($this->db, $sql);
@@ -201,7 +201,7 @@ class WikiStream
 		}
 	}
 
-	public function update_from_sparql()
+	public function update_from_sparql(): void
 	{
 		$new_qs = [];
 		$existing_qs = $this->get_items_in_db();
@@ -248,14 +248,14 @@ class WikiStream
 		}
 	}
 
-	public function remove_unused_people()
+	public function remove_unused_people(): void
 	{
 		$sql =
 			"DELETE FROM person WHERE q NOT IN (SELECT DISTINCT section_q from section)";
 		$this->tfc->getSQL($this->db, $sql);
 	}
 
-	protected function get_earliest_year($item, $property)
+	protected function get_earliest_year($item, $property): int|string
 	{
 		$years = [];
 		foreach ($item->getClaims($property) as $c) {
@@ -292,7 +292,7 @@ class WikiStream
 		&$qs,
 		&$sections,
 		&$entry_files
-	) {
+	): void {
 		$item = $wil->getItem($item_q_numeric);
 		if (!isset($item)) {
 			return;
@@ -412,7 +412,7 @@ class WikiStream
 		$this->update_item_labels($item);
 	}
 
-	protected function add_item_details_chunk($chunk)
+	protected function add_item_details_chunk($chunk): void
 	{
 		$wil = new WikidataItemList();
 		$wil->loadItems($chunk);
@@ -464,7 +464,7 @@ class WikiStream
 		$this->tfc->getSQL($this->db, $sql);
 	}
 
-	public function add_missing_item_details()
+	public function add_missing_item_details(): void
 	{
 		$sql = "SELECT `q` FROM `item` WHERE `available`=0";
 		$result = $this->tfc->getSQL($this->db, $sql);
@@ -480,7 +480,7 @@ class WikiStream
 		}
 	}
 
-	public function make_rc_unavailable()
+	public function make_rc_unavailable(): void
 	{
 		$last_rc_check = "";
 		$sql = "SELECT `value` FROM `kv` WHERE `key`='last_rc_check'";
@@ -538,12 +538,12 @@ class WikiStream
 		$this->tfc->getSQL($this->db, $sql);
 	}
 
-	public function get_recently_added($num = 25, $section_q = null)
+	public function get_recently_added($num = 25, $section_q = null): array
 	{
 		return $this->get_item_view("vw_recently_added", $num, $section_q);
 	}
 
-	public function get_ranked_items($num = 25, $section_q = null)
+	public function get_ranked_items($num = 25, $section_q = null): array
 	{
 		return $this->get_item_view(
 			"vw_ranked_entries_blacklist",
@@ -557,7 +557,7 @@ class WikiStream
 		$num = 25,
 		$section_q = null,
 		$subquery = null,
-	) {
+	): array {
 		$ret = [];
 		$sql = "SELECT * FROM `{$view_name}` WHERE 1=1";
 		if (isset($section_q) and $section_q != null) {
@@ -588,7 +588,7 @@ class WikiStream
 		return 0;
 	}
 
-	protected function fix_item_image(&$o)
+	protected function fix_item_image(&$o): object
 	{
 		if (!isset($o->files)) {
 			return $o;
@@ -602,7 +602,7 @@ class WikiStream
 		return $o;
 	}
 
-	protected function update_item_labels($item)
+	protected function update_item_labels($item): void
 	{
 		$q = $item->getQ();
 		$q_numeric = preg_replace("|\D|", "", $q);
@@ -622,7 +622,7 @@ class WikiStream
 		}
 	}
 
-	public function import_missing_section_labels()
+	public function import_missing_section_labels(): void
 	{
 		$sql =
 			"SELECT `section_q` AS `q` FROM `section` WHERE `section_q` NOT IN (SELECT DISTINCT `q` FROM label)";
@@ -652,7 +652,7 @@ class WikiStream
 		$num = 20,
 		$properties = [],
 		$skip_section_q = null,
-	) {
+	): array {
 		if ($skip_section_q == null) {
 			$skip_section_q = $this->config->skip_section_q;
 		}
@@ -708,7 +708,7 @@ class WikiStream
 		$num = 20,
 		$properties = [],
 		$skip_section_q = null,
-	) {
+	): array {
 		if ($skip_section_q == null) {
 			$skip_section_q = $this->config->skip_section_q;
 		}
@@ -734,7 +734,7 @@ class WikiStream
 		return $ret;
 	}
 
-	protected function get_year_stats()
+	protected function get_year_stats(): array
 	{
 		$ret = [];
 		$sql =
@@ -754,7 +754,7 @@ class WikiStream
 	public function get_main_page_data(
 		$max_movies_per_section = 25,
 		$max_sections = 20,
-	) {
+	): array {
 		$out = ["status" => "OK"];
 		$out["sections"] = [];
 		$out["sections"][] = [
@@ -814,7 +814,7 @@ class WikiStream
 		return $out;
 	}
 
-	public function populate_section($section, $item, $max = 25)
+	public function populate_section($section, $item, $max = 25): array
 	{
 		$title = $item->getLabel();
 		$total = $this->get_item_view_count("vw_ranked_entries_blacklist", $section->section_q);
@@ -828,7 +828,7 @@ class WikiStream
 		];
 	}
 
-	public function search_sections($query)
+	public function search_sections($query): array
 	{
 		$ret = [];
 		$query_safe = $this->db->real_escape_string(trim($query));
@@ -863,7 +863,7 @@ class WikiStream
 		return $ret;
 	}
 
-	public function search_entries($query)
+	public function search_entries($query): array
 	{
 		$ret = [];
 		$query_safe = $this->db->real_escape_string(trim($query));
@@ -879,7 +879,7 @@ class WikiStream
 		return $ret;
 	}
 
-	public function search_people($query)
+	public function search_people($query): array
 	{
 		$ret = [];
 		$query_safe = $this->db->real_escape_string(trim($query));
@@ -894,7 +894,7 @@ class WikiStream
 		return $ret;
 	}
 
-	public function update_persons()
+	public function update_persons(): void
 	{
 		$sql =
 			"SELECT DISTINCT `section_q` FROM `section` WHERE `property` IN (" .
@@ -940,7 +940,7 @@ class WikiStream
 		}
 	}
 
-	public function generate_all_data()
+	public function generate_all_data(): void
 	{
 		$data = $this->get_main_page_data(PHP_INT_MAX, PHP_INT_MAX);
 		$data = json_encode($data);
@@ -948,7 +948,7 @@ class WikiStream
 		file_put_contents($filename, $data);
 	}
 
-	public function generate_main_page_data()
+	public function generate_main_page_data(): void
 	{
 		$out = $this->get_main_page_data();
 		$out = "var config = " . json_encode($out) . ";";
@@ -970,7 +970,7 @@ class WikiStream
 		}
 	}
 
-	public function import_item_whitelist()
+	public function import_item_whitelist(): void
 	{
 		if ($this->config->whitelist_page == "") {
 			return;
@@ -1002,7 +1002,7 @@ class WikiStream
 		$this->tfc->getSQL($this->db, $sql);
 	}
 
-	public function import_item_blacklist()
+	public function import_item_blacklist(): void
 	{
 		# Delete old blacklist
 		$sql = "TRUNCATE `blacklist`";
@@ -1038,7 +1038,7 @@ class WikiStream
 		$this->tfc->getSQL($this->db, $sql);
 	}
 
-	public function reset_all()
+	public function reset_all(): void
 	{
 		$sql = "TRUNCATE `section`";
 		$this->tfc->getSQL($this->db, $sql);
@@ -1048,7 +1048,7 @@ class WikiStream
 		$this->tfc->getSQL($this->db, $sql);
 	}
 
-	public function purge_items_without_files()
+	public function purge_items_without_files(): void
 	{
 		$sql =
 			"DELETE FROM section WHERE item_q NOT IN (SELECT item_q FROM `file`)";
@@ -1089,7 +1089,7 @@ class WikiStream
 		return round($seconds);
 	}
 
-	public function annotate_ia_movies()
+	public function annotate_ia_movies(): void
 	{
 		ini_set("memory_limit", "4G");
 
@@ -1189,7 +1189,7 @@ class WikiStream
 		}
 	}
 
-	public function update_item_no_files()
+	public function update_item_no_files(): void
 	{
 		# Remove items where there is already one with a file
 		$sql =
@@ -1249,12 +1249,12 @@ class WikiStream
 		}
 	}
 
-	private function get_json_from_url($url)
+	private function get_json_from_url($url): ?object
 	{
 		return $this->httpClient->getJson($url);
 	}
 
-	private function search_internet_archive_via_imdb($q_numeric) {
+	private function search_internet_archive_via_imdb($q_numeric): array {
 		$ret = [];
 		$q = "Q{$q_numeric}";
 		$wil = new WikidataItemList();
@@ -1287,7 +1287,7 @@ class WikiStream
 		return $ret;
 	}
 
-	private function search_internet_archive_via_title_and_year($o) {
+	private function search_internet_archive_via_title_and_year($o): int {
 		$query = "\"{$o->title}\"";
 		if (isset($o->year)) {
 			$query .= " {$o->year}";
@@ -1301,7 +1301,7 @@ class WikiStream
 		return $hits;
 	}
 
-	public function update_item_no_files_search_results()
+	public function update_item_no_files_search_results(): void
 	{
 		# Internet Archive
 		$sql = "SELECT * FROM `item_no_files` WHERE `ia_results` IS NULL LIMIT 100";
@@ -1334,7 +1334,7 @@ class WikiStream
 		}
 	}
 
-	public function get_candidate_items($limit, $offset)
+	public function get_candidate_items($limit, $offset): array
 	{
 		$ret = [];
 		$limit *= 1;
@@ -1347,18 +1347,18 @@ class WikiStream
 		return $ret;
 	}
 
-	public function get_total_candidate_items()
+	public function get_total_candidate_items(): int
 	{
 		$ret = 0;
 		$sql = "SELECT count(*) AS total FROM `item_no_files`";
 		$result = $this->tfc->getSQL($this->db, $sql);
 		if ($o = $result->fetch_object()) {
-			$ret = $o->total;
+			$ret = (int) $o->total;
 		}
 		return $ret;
 	}
 
-	public function get_items_by_year($year)
+	public function get_items_by_year($year): array
 	{
 		return $this->get_item_view(
 			"vw_ranked_entries",
@@ -1368,7 +1368,7 @@ class WikiStream
 		);
 	}
 
-	public function set_user_list_state($user_id, $q, $state)
+	public function set_user_list_state($user_id, $q, $state): void
 	{
 		$user_id *= 1;
 		$q *= 1;
@@ -1381,7 +1381,7 @@ class WikiStream
 		$this->tfc->getSQL($this->db, $sql);
 	}
 
-	public function is_user_watching_item($user_id, $q)
+	public function is_user_watching_item($user_id, $q): bool
 	{
 		$user_id *= 1;
 		$q *= 1;
@@ -1393,7 +1393,7 @@ class WikiStream
 		return false;
 	}
 
-	public function clear_bad_genres()
+	public function clear_bad_genres(): void
 	{
 		if (!isset($this->config->bad_genres)) {
 			return;
@@ -1442,7 +1442,7 @@ class WikiStream
 	// Returns the item for a property/file combination
 	// Returns the first one found (there might be multiple, not good)
 	// Returns 0 if not found
-	public function getItemForFile($prop, $key)
+	public function getItemForFile($prop, $key): int
 	{
 		$prop_safe = $prop * 1;
 		$key_safe = $this->db->real_escape_string($key);
@@ -1454,7 +1454,7 @@ class WikiStream
 		return 0;
 	}
 
-	public function logEvent($event, $q = null)
+	public function logEvent($event, $q = null): void
 	{
 		$ts = $this->tfc->getCurrentTimestamp();
 		$ts_safe = substr($ts, 0, 10); # Just the hour

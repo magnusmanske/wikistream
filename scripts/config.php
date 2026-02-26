@@ -1,7 +1,7 @@
 <?php class WikiStreamConfig
 {
 	/// Returns an instance of the appropriate config class, as per the config.js file in the tool root directory
-	function get_config_instance()
+	function get_config_instance(): self
 	{
 		$config_file_name = __DIR__ . "/../config.json";
 		if (!file_exists($config_file_name)) {
@@ -72,7 +72,7 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig
 		"help_page" => "https://www.wikidata.org/wiki/Help:WikiFlix",
 	];
 
-	public function add_special_sections(&$ws, &$out)
+	public function add_special_sections(&$ws, &$out): void
 	{
 		$out["sections"][] = [
 			"title" => "Female directors",
@@ -84,7 +84,7 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig
 		&$ws,
 		$num = 25,
 		$section_q = null
-	) {
+	): array {
 		return $ws->get_item_view(
 			"vw_ranked_entries_blacklist",
 			$num,
@@ -133,7 +133,7 @@ class WikiStreamConfigWikiVibes extends WikiStreamConfig
 		"help_page" => "https://www.wikidata.org/wiki/Help:WikiVibes",
 	];
 
-	public function add_special_sections(&$ws, &$out)
+	public function add_special_sections(&$ws, &$out): void
 	{
 		# Nothing
 	}
