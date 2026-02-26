@@ -122,9 +122,8 @@ class WikiStream
 	{
 		$sql = "SELECT * FROM `file` WHERE `property`=10 AND `minutes` IS NULL";
 		$result = $this->tfc->getSQL($this->db, $sql);
-		$minutes = ""; # Dummy
 		while ($o = $result->fetch_object()) {
-			unset($minutes);
+			$minutes = null;
 			$url =
 				"https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=metadata&&titles=File:" .
 				urlencode($o->key);
@@ -153,7 +152,7 @@ class WikiStream
 					}
 				}
 			}
-			if (!isset($minutes)) {
+			if ($minutes === null) {
 				continue;
 			}
 			$sql = "UPDATE `file` SET `minutes`={$minutes} WHERE id={$o->id} AND `minutes` IS NULL";
