@@ -1061,7 +1061,7 @@ class WikiStream
 			$seconds = ($m[1] * 60 + $m[2]) * 60 + $m[3];
 		} elseif (preg_match('|^(\d+):(\d+)$|', $s, $m)) {
 			$seconds = $m[1] * 60 + $m[2];
-		} elseif (preg_match('|^(\d+),(\d+)'$|', $s, $m)) {
+		} elseif (preg_match('|^(\d+),(\d+)\'$|', $s, $m)) {
 			$seconds = ($m[1] * 60 + $m[2]) * 60;
 		} elseif (preg_match('|^(\d+[.0-9]*)$|', $s, $m)) {
 			$seconds = $s * 1;
