@@ -1258,7 +1258,7 @@ class WikiStream
 		return json_decode($response);
 	}
 
-	function search_internet_archive_via_imdb($q_numeric) {
+	private function search_internet_archive_via_imdb($q_numeric) {
 		$ret = [];
 		$q = "Q{$q_numeric}";
 		$wil = new WikidataItemList();
@@ -1291,7 +1291,7 @@ class WikiStream
 		return $ret;
 	}
 
-	function search_internet_archive_via_title_and_year($o) {
+	private function search_internet_archive_via_title_and_year($o) {
 		$query = "\"{$o->title}\"";
 		if (isset($o->year)) {
 			$query .= " {$o->year}";
