@@ -461,21 +461,23 @@ class WikiStream
 			$qs_person[] = $o->q;
 		}
 
-		$qs = array_merge($qs_item, $qs_person);
+		$all_qs = array_values(array_unique(array_merge($qs_item, $qs_person)));
 
 		$dbwd = $this->tfc->openDBwiki("wikidatawiki");
-		$sql =
-			"SELECT `rc_title`,`rc_timestamp` FROM `recentchanges`
+		$qs = [];
+		foreach (array_chunk($all_qs, 1000) as $chunk) {
+			$sql =
+				"SELECT `rc_title`,`rc_timestamp` FROM `recentchanges`
 				WHERE `rc_namespace`=0 AND `rc_timestamp`>'{$last_rc_check}'
 				AND `rc_title` IN ('Q" .
-			implode("','Q", $qs) .
-			"')";
-		$result = $this->tfc->getSQL($dbwd, $sql);
-		$qs = [];
-		while ($o = $result->fetch_object()) {
-			$qs[$o->rc_title] = preg_replace("|\D|", "", $o->rc_title) * 1;
-			if ($last_rc_check < $o->rc_timestamp) {
-				$last_rc_check = $o->rc_timestamp;
+				implode("','Q", $chunk) .
+				"')";
+			$result = $this->tfc->getSQL($dbwd, $sql);
+			while ($o = $result->fetch_object()) {
+				$qs[$o->rc_title] = preg_replace("|\D|", "", $o->rc_title) * 1;
+				if ($last_rc_check < $o->rc_timestamp) {
+					$last_rc_check = $o->rc_timestamp;
+				}
 			}
 		}
 
