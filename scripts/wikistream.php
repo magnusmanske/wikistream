@@ -197,13 +197,15 @@ class WikiStream
 		if (count($new_qs) == 0) {
 			return;
 		} # Nothing new on the western front
-		$new_qs = array_unique($new_qs);
+		$new_qs = array_values(array_unique($new_qs));
 		print "Adding " . count($new_qs) . " new items\n";
-		$sql =
-			"INSERT IGNORE INTO `item` (`q`) VALUES (" .
-			implode("),(", $new_qs) .
-			")";
-		$this->tfc->getSQL($this->db, $sql);
+		foreach (array_chunk($new_qs, 500) as $chunk) {
+			$sql =
+				"INSERT IGNORE INTO `item` (`q`) VALUES (" .
+				implode("),(", $chunk) .
+				")";
+			$this->tfc->getSQL($this->db, $sql);
+		}
 	}
 
 	public function remove_unused_people()
