@@ -2,6 +2,7 @@
 require_once __DIR__ . "/../public_html/php/ToolforgeCommon.php";
 require_once __DIR__ . "/../public_html/php/wikidata.php";
 require_once __DIR__ . "/../scripts/config.php";
+require_once __DIR__ . "/../scripts/HttpClient.php";
 
 class WikiStream
 {
@@ -16,8 +17,9 @@ class WikiStream
 	public $language = "en";
 	public $config;
 	protected $db;
+	protected HttpClientInterface $httpClient;
 
-	public function __construct($config = null, $tfc = null)
+	public function __construct($config = null, $tfc = null, ?HttpClientInterface $httpClient = null)
 	{
 		if ($config == null) {
 			die("Config not set");
@@ -29,6 +31,7 @@ class WikiStream
 			$this->tfc = $tfc;
 		}
 		$this->db = $this->tfc->openDBtool($this->config->tool_db);
+		$this->httpClient = $httpClient ?? new CurlHttpClient();
 	}
 
 	public function getPerson($q, $add_files = true)
@@ -1248,21 +1251,7 @@ class WikiStream
 
 	private function get_json_from_url($url)
 	{
-		$userAgent =
-			"Mozilla/5.0 (Windows NT 5.1; rv:31.0) Gecko/20100101 Firefox/31.0";
-		$ch = curl_init();
-		curl_setopt($ch, CURLOPT_URL, $url);
-		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-		curl_setopt($ch, CURLOPT_USERAGENT, $userAgent);
-		$response = curl_exec($ch);
-		if ($response === false) {
-			error_log("curl error for {$url}: " . curl_error($ch));
-			curl_close($ch);
-			return null;
-		}
-		curl_close($ch);
-		return json_decode($response);
+		return $this->httpClient->getJson($url);
 	}
 
 	private function search_internet_archive_via_imdb($q_numeric) {
