@@ -1397,7 +1397,7 @@ class WikiStream
 		} else {
 			$q_safe = $q * 1;
 		}
-		$sql = "INSERT INTO `logging` (`timestamp`,`event`,`q`,`counter`) VALUES ('{$ts_safe}','{$event_safe}',{$q},1) ON DUPLICATE KEY UPDATE `counter`=`counter`+1";
+		$sql = "INSERT INTO `logging` (`timestamp`,`event`,`q`,`counter`) VALUES ('{$ts_safe}','{$event_safe}',{$q_safe},1) ON DUPLICATE KEY UPDATE `counter`=`counter`+1";
 		$this->tfc->getSQL($this->db, $sql);
 	}
 }
