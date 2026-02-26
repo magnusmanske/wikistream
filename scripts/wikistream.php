@@ -51,6 +51,23 @@ class WikiStream
 		return $ret;
 	}
 
+	// Batch-fetch person records (without files) for a list of Q-numbers.
+	// Returns an array keyed by numeric Q-id.
+	protected function getPersonsBatch(array $qs): array
+	{
+		if (count($qs) === 0) {
+			return [];
+		}
+		$qs_safe = implode(",", array_map(fn($q) => (int) $q, $qs));
+		$sql = "SELECT * FROM `person` WHERE `q` IN ({$qs_safe})";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		$people = [];
+		while ($o = $result->fetch_object()) {
+			$people[(int) $o->q] = $o;
+		}
+		return $people;
+	}
+
 	public function getEntry($q)
 	{
 		$ret = (object) [];
@@ -76,18 +93,32 @@ class WikiStream
 		$sections = [];
 		$to_load = [];
 		$ret->people = [];
+		$person_rows = []; // collect [property, section_q] pairs for batch loading
 		while ($o = $result->fetch_object()) {
 			if (in_array($o->property, $this->config->people_props)) {
-				if (!isset($ret->people["P{$o->property}"])) {
-					$ret->people["P{$o->property}"] = [];
-				}
-				$ret->people["P{$o->property}"][
-					"Q{$o->section_q}"
-				] = $this->getPerson($o->section_q, false);
+				$person_rows[] = $o;
 			} else {
 				$sections[] = $o;
 				$to_load[] = $o->section_q;
 			}
+		}
+
+		// Batch-fetch all person records in a single query
+		$person_qs = array_map(fn($r) => $r->section_q, $person_rows);
+		$persons_by_q = $this->getPersonsBatch($person_qs);
+		foreach ($person_rows as $o) {
+			if (!isset($ret->people["P{$o->property}"])) {
+				$ret->people["P{$o->property}"] = [];
+			}
+			$q_num = (int) $o->section_q;
+			$person_obj = (object) ["q" => $q_num, "entries" => []];
+			if (isset($persons_by_q[$q_num])) {
+				$p = $persons_by_q[$q_num];
+				$person_obj->label = $p->label;
+				$person_obj->gender = $p->gender;
+				$person_obj->image = $p->image;
+			}
+			$ret->people["P{$o->property}"]["Q{$o->section_q}"] = $person_obj;
 		}
 		$wil = new WikidataItemList();
 		$wil->loadItems($to_load);
