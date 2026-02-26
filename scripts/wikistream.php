@@ -974,41 +974,41 @@ class WikiStream
 		$this->tfc->getSQL($this->db, $sql);
 	}
 
+	private static function parse_seconds(string $s): int
+	{
+		$seconds = 0;
+		if (preg_match('|^(\d+)[,:](\d+)[:\'](\d+)$|', $s, $m)) {
+			$seconds = ($m[1] * 60 + $m[2]) * 60 + $m[3];
+		} elseif (preg_match('|^(\d+):(\d+)$|', $s, $m)) {
+			$seconds = $m[1] * 60 + $m[2];
+		} elseif (preg_match('|^(\d+),(\d+)'$|', $s, $m)) {
+			$seconds = ($m[1] * 60 + $m[2]) * 60;
+		} elseif (preg_match('|^(\d+[.0-9]*)$|', $s, $m)) {
+			$seconds = $s * 1;
+		} elseif (preg_match("|(\d+) *min (\d+) *sec|", $s, $m)) {
+			$seconds = $m[1] * 60 + $m[2] * 1;
+		} elseif (preg_match("|(\d+) *h (\d+) *m|", $s, $m)) {
+			$seconds = ($m[1] * 60 + $m[2] * 1) * 60;
+		} elseif (
+			preg_match(
+				"/(\d+[.0-9]*) *(min|minute|minutes|min\.)/i",
+				$s,
+				$m,
+			)
+		) {
+			$seconds = $m[1] * 60;
+		} else {
+			error_log("Length: {$s}");
+		}
+		if ($seconds < 120) {
+			$seconds = 0;
+		} // Filter out some faulty parsing
+		return round($seconds);
+	}
+
 	public function annotate_ia_movies()
 	{
 		ini_set("memory_limit", "4G");
-
-		function parse_seconds($s)
-		{
-			$seconds = 0;
-			if (preg_match('|^(\d+)[,:](\d+)[:\'](\d+)$|', $s, $m)) {
-				$seconds = ($m[1] * 60 + $m[2]) * 60 + $m[3];
-			} elseif (preg_match('|^(\d+):(\d+)$|', $s, $m)) {
-				$seconds = $m[1] * 60 + $m[2];
-			} elseif (preg_match('|^(\d+),(\d+)’$|', $s, $m)) {
-				$seconds = ($m[1] * 60 + $m[2]) * 60;
-			} elseif (preg_match('|^(\d+[.0-9]*)$|', $s, $m)) {
-				$seconds = $s * 1;
-			} elseif (preg_match("|(\d+) *min (\d+) *sec|", $s, $m)) {
-				$seconds = $m[1] * 60 + $m[2] * 1;
-			} elseif (preg_match("|(\d+) *h (\d+) *m|", $s, $m)) {
-				$seconds = ($m[1] * 60 + $m[2] * 1) * 60;
-			} elseif (
-				preg_match(
-					"/(\d+[.0-9]*) *(min|minute|minutes|min\.)/i",
-					$s,
-					$m,
-				)
-			) {
-				$seconds = $m[1] * 60;
-			} else {
-				error_log("Length: {$s}");
-			}
-			if ($seconds < 120) {
-				$seconds = 0;
-			} // Filter out some faulty parsing
-			return round($seconds);
-		}
 
 		$sparql = "SELECT ?q ?ia {
 			?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P724 ?ia . # A film with an Internet Archive value
@@ -1067,7 +1067,7 @@ class WikiStream
 
 			unset($minutes);
 			if (isset($j->metadata) and isset($j->metadata->runtime)) {
-				$seconds = parse_seconds($j->metadata->runtime);
+				$seconds = self::parse_seconds($j->metadata->runtime);
 				if ($seconds > 0) {
 					$minutes = round($seconds / 60);
 				}
@@ -1077,7 +1077,7 @@ class WikiStream
 					if (!isset($file->length)) {
 						continue;
 					}
-					$seconds = parse_seconds($file->length);
+					$seconds = self::parse_seconds($file->length);
 					if ($seconds == 0) {
 						continue;
 					}
