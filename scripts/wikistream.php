@@ -531,6 +531,19 @@ class WikiStream
 		return $ret;
 	}
 
+	protected function get_item_view_count($view_name, $section_q = null): int
+	{
+		$sql = "SELECT COUNT(*) AS `cnt` FROM `{$view_name}` WHERE 1=1";
+		if (isset($section_q) and $section_q != null) {
+			$sql .= " AND `q` IN (SELECT item_q FROM section WHERE section_q={$section_q})";
+		}
+		$result = $this->tfc->getSQL($this->db, $sql);
+		if ($o = $result->fetch_object()) {
+			return (int) $o->cnt;
+		}
+		return 0;
+	}
+
 	protected function fix_item_image(&$o)
 	{
 		if (!isset($o->files)) {
@@ -733,9 +746,8 @@ class WikiStream
 	public function populate_section($section, $item, $max = 25)
 	{
 		$title = $item->getLabel();
-		$entries = $this->get_ranked_items(PHP_INT_MAX, $section->section_q);
-		$total = count($entries);
-		$entries = array_slice($entries, 0, $max);
+		$total = $this->get_item_view_count("vw_ranked_entries_blacklist", $section->section_q);
+		$entries = $this->get_ranked_items($max, $section->section_q);
 		return [
 			"q" => $section->section_q,
 			"title" => $title,
