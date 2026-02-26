@@ -633,6 +633,33 @@ class WikiStream
 		return $ret;
 	}
 
+	protected function get_top_sections_count(
+		$properties = [],
+		$skip_section_q = null,
+	): int {
+		if ($skip_section_q == null) {
+			$skip_section_q = $this->config->skip_section_q;
+		}
+		if (count($properties) == 0) {
+			$properties = $this->config->misc_section_props;
+		}
+		$skip_section_q = array_merge(
+			$skip_section_q,
+			$this->config->bad_genres,
+		);
+		$sql =
+			"SELECT COUNT(*) AS `cnt` FROM `vw_section_property_q` WHERE `property` IN (" .
+			implode(",", $properties) .
+			") AND `section_q` NOT IN (" .
+			implode(",", $skip_section_q) .
+			")";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		if ($o = $result->fetch_object()) {
+			return (int) $o->cnt;
+		}
+		return 0;
+	}
+
 	public function get_random_sections(
 		$num = 20,
 		$properties = [],
@@ -734,7 +761,7 @@ class WikiStream
 			$out["person_total"] = $o->cnt;
 		}
 
-		$out["section_total"] = count($this->get_top_sections(PHP_INT_MAX));
+		$out["section_total"] = $this->get_top_sections_count();
 
 		$out["years"] = $this->get_year_stats();
 
