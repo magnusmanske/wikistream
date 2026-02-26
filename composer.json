@@ -1,0 +1,19 @@
+{
+	"name": "magnusmanske/wikistream",
+	"description": "WikiStream / WikiFlix / WikiVibes Toolforge tool",
+	"type": "project",
+	"require": {
+		"php": ">=8.2"
+	},
+	"require-dev": {
+		"phpunit/phpunit": "^11"
+	},
+	"autoload-dev": {
+		"psr-4": {
+			"WikiStream\\Tests\\": "tests/"
+		}
+	},
+	"config": {
+		"optimize-autoloader": true
+	}
+}
