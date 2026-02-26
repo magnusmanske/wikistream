@@ -1307,9 +1307,6 @@ class WikiStream
 
 	public function update_item_no_files_search_results()
 	{
-		$userAgent =
-			"Mozilla/5.0 (Windows NT 5.1; rv:31.0) Gecko/20100101 Firefox/31.0";
-
 		# Internet Archive
 		if (true) {
 			$sql = "SELECT * FROM `item_no_files` WHERE `ia_results` IS NULL LIMIT 100";
