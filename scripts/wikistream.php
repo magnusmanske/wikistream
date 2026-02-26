@@ -1308,38 +1308,33 @@ class WikiStream
 	public function update_item_no_files_search_results()
 	{
 		# Internet Archive
-		if (true) {
-			$sql = "SELECT * FROM `item_no_files` WHERE `ia_results` IS NULL LIMIT 100";
-			$result = $this->tfc->getSQL($this->db, $sql);
-			while ($o = $result->fetch_object()) {
-				if ( trim($o->title)=='' ) continue;
-				$hits = count($this->search_internet_archive_via_imdb($o->q));
-				if ( $hits==0 ) $hits = $this->search_internet_archive_via_title_and_year($o);
-				$sql = "UPDATE `item_no_files` SET `ia_results`={$hits} WHERE `q`={$o->q}";
-				$this->tfc->getSQL($this->db, $sql);
-				sleep(2);
-			}
+		$sql = "SELECT * FROM `item_no_files` WHERE `ia_results` IS NULL LIMIT 100";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		while ($o = $result->fetch_object()) {
+			if ( trim($o->title)=='' ) continue;
+			$hits = count($this->search_internet_archive_via_imdb($o->q));
+			if ( $hits==0 ) $hits = $this->search_internet_archive_via_title_and_year($o);
+			$sql = "UPDATE `item_no_files` SET `ia_results`={$hits} WHERE `q`={$o->q}";
+			$this->tfc->getSQL($this->db, $sql);
+			sleep(2);
 		}
 
 		# Commons
-		if (true) {
-			$sql =
-				"SELECT * FROM `item_no_files` WHERE `commons_results` IS NULL LIMIT 100";
-			$result = $this->tfc->getSQL($this->db, $sql);
-			while ($o = $result->fetch_object()) {
-				$query = "filetype:video \"{$o->title}\"";
-				if (isset($o->year)) {
-					$query .= " {$o->year}";
-				}
-				$url =
-					"https://commons.wikimedia.org/w/api.php?action=query&list=search&srnamespace=6&format=json&srsearch=" .
-					urlencode($query);
-				$j = $this->get_json_from_url($url);
-				$hits = count($j->query->search);
-				$sql = "UPDATE `item_no_files` SET `commons_results`={$hits} WHERE `q`={$o->q}";
-				$this->tfc->getSQL($this->db, $sql);
-				// print "{$sql}\n" ;
+		$sql =
+			"SELECT * FROM `item_no_files` WHERE `commons_results` IS NULL LIMIT 100";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		while ($o = $result->fetch_object()) {
+			$query = "filetype:video \"{$o->title}\"";
+			if (isset($o->year)) {
+				$query .= " {$o->year}";
 			}
+			$url =
+				"https://commons.wikimedia.org/w/api.php?action=query&list=search&srnamespace=6&format=json&srsearch=" .
+				urlencode($query);
+			$j = $this->get_json_from_url($url);
+			$hits = count($j->query->search);
+			$sql = "UPDATE `item_no_files` SET `commons_results`={$hits} WHERE `q`={$o->q}";
+			$this->tfc->getSQL($this->db, $sql);
 		}
 	}
 
