@@ -5,6 +5,13 @@ require_once __DIR__ . "/../scripts/config.php";
 
 class WikiStream
 {
+	// Wikidata item/property IDs used in PHP logic
+	private const WD_GENDER_MALE        = "Q6581097";
+	private const WD_GENDER_FEMALE      = "Q6581072";
+	private const WD_TRAILER            = "Q622550";   // P3831 qualifier value: trailer
+	private const WD_DO_NOT_USE         = "Q124428688"; // P11484 qualifier: do not use for WikiFlix
+	private const WD_UNIT_MINUTE        = "http://www.wikidata.org/entity/Q7727";
+
 	public $tfc;
 	public $language = "en";
 	public $config;
@@ -339,7 +346,7 @@ class WikiStream
 				$skip_file = false;
 				if (isset($c->qualifiers) and isset($c->qualifiers->P11484)) {
 					foreach ($c->qualifiers->P11484 as $qual) {
-						if ($qual->datavalue->value->id == "Q124428688") {
+						if ($qual->datavalue->value->id == self::WD_DO_NOT_USE) {
 							$skip_file = true;
 						}
 					}
@@ -352,7 +359,7 @@ class WikiStream
 				$is_trailer_safe = 0;
 				if (isset($c->qualifiers) and isset($c->qualifiers->P3831)) {
 					foreach ($c->qualifiers->P3831 as $qual) {
-						if ($qual->datavalue->value->id == "Q622550") {
+						if ($qual->datavalue->value->id == self::WD_TRAILER) {
 							$is_trailer_safe = 1;
 						}
 					}
@@ -383,7 +390,7 @@ class WikiStream
 			}
 			if (
 				$c->mainsnak->datavalue->value->unit ==
-				"http://www.wikidata.org/entity/Q7727"
+				self::WD_UNIT_MINUTE
 			) {
 				$minutes_safe = $c->mainsnak->datavalue->value->amount * 1; # Minutes
 			}
@@ -906,10 +913,10 @@ class WikiStream
 				}
 				$label_safe = $this->db->real_escape_string($item->getLabel());
 				$gender_safe = "?";
-				if ($item->hasTarget("P21", "Q6581097")) {
+				if ($item->hasTarget("P21", self::WD_GENDER_MALE)) {
 					$gender_safe = "M";
 				}
-				if ($item->hasTarget("P21", "Q6581072")) {
+				if ($item->hasTarget("P21", self::WD_GENDER_FEMALE)) {
 					$gender_safe = "F";
 				}
 				$sites_safe = count($item->getSitelinks());
