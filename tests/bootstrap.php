@@ -76,6 +76,7 @@ if (!class_exists('WikidataItemList')) {
 // ---------------------------------------------------------------------------
 
 require_once __DIR__ . '/../scripts/config.php';
+require_once __DIR__ . '/../scripts/HttpClient.php';
 
 // Prevent the require_once calls inside wikistream.php from trying to load
 // files that don't exist in the local checkout by overriding the include path.
