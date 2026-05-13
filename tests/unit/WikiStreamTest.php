@@ -627,6 +627,56 @@ final class WikiStreamTest extends TestCase
         $this->assertStringStartsWith('DELETE FROM `label`', $sqls[0]);
     }
 
+    // ------------------------------------------------------------------
+    // getRandomEntryQ — does not use ORDER BY RAND()
+    // ------------------------------------------------------------------
+
+    public function test_getRandomEntryQ_uses_min_max_strategy(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $bounds          = new \stdClass();
+        $bounds->lo      = 10;
+        $bounds->hi      = 100;
+
+        $pick     = new \stdClass();
+        $pick->q  = 42;
+
+        $callCount = 0;
+        $tfc->method('getSQL')->willReturnCallback(
+            function ($db, string $sql) use (&$callCount, $bounds, $pick) {
+                $callCount++;
+                if ($callCount === 1) {
+                    $this->assertStringContainsString('MIN(q)', $sql);
+                    $this->assertStringContainsString('MAX(q)', $sql);
+                    $this->assertStringNotContainsString('RAND()', $sql);
+                    return $this->makeResult([$bounds]);
+                }
+                $this->assertStringContainsString('WHERE `q` >=', $sql);
+                $this->assertStringNotContainsString('RAND()', $sql);
+                return $this->makeResult([$pick]);
+            }
+        );
+
+        $q = $ws->getRandomEntryQ();
+        $this->assertSame(42, $q);
+        $this->assertSame(2, $callCount);
+    }
+
+    public function test_getRandomEntryQ_returns_null_on_empty_table(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $bounds          = new \stdClass();
+        $bounds->lo      = null;
+        $bounds->hi      = null;
+
+        $tfc->expects($this->once())->method('getSQL')
+            ->willReturn($this->makeResult([$bounds]));
+
+        $this->assertNull($ws->getRandomEntryQ());
+    }
+
     public function test_import_commons_video_minutes_no_rows_skips_http(): void
     {
         $httpClient = $this->createMock(\HttpClientInterface::class);

@@ -91,9 +91,39 @@ class WikiStream
 
 	public function getRandomEntryQ(): ?int
 	{
-		$sql = "SELECT `q` FROM `vw_ranked_entries` ORDER BY RAND() LIMIT 1";
+		// ORDER BY RAND() forces a full scan + filesort over the view; on a
+		// growing dataset that's a per-request latency cliff. Instead pick
+		// a random q in [min,max] and return the next row at/after it.
+		// Slightly gap-biased (items after a large gap get picked more
+		// often), which is acceptable for "random entry" semantics.
+		$sql = "SELECT MIN(q) AS `lo`, MAX(q) AS `hi` FROM `vw_ranked_entries`";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		$lo = $hi = null;
+		if ($o = $result->fetch_object()) {
+			$lo = isset($o->lo) ? (int) $o->lo : null;
+			$hi = isset($o->hi) ? (int) $o->hi : null;
+		}
+		$this->freeResult($result);
+		if ($lo === null || $hi === null || $lo > $hi) {
+			return null;
+		}
+
+		$rand = $lo === $hi ? $lo : mt_rand($lo, $hi);
+		$sql = "SELECT `q` FROM `vw_ranked_entries` WHERE `q` >= {$rand} ORDER BY `q` LIMIT 1";
 		$result = $this->tfc->getSQL($this->db, $sql);
 		$q = null;
+		if ($o = $result->fetch_object()) {
+			$q = (int) $o->q;
+		}
+		$this->freeResult($result);
+		if ($q !== null) {
+			return $q;
+		}
+
+		// No row at or after $rand (the highest q happens to be unavailable);
+		// wrap around to the smallest q.
+		$sql = "SELECT `q` FROM `vw_ranked_entries` ORDER BY `q` LIMIT 1";
+		$result = $this->tfc->getSQL($this->db, $sql);
 		if ($o = $result->fetch_object()) {
 			$q = (int) $o->q;
 		}
