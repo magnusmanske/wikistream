@@ -394,3 +394,30 @@ div.person-description {
         animation: none;
     }
 }
+
+/* ── infinite-scroll affordances (section-page, special-page) ────── */
+/* The sentinel is visually empty — it exists only as an
+   IntersectionObserver target near the bottom of the rendered list. */
+.infinite-sentinel {
+    height: 1px;
+    width: 100%;
+    pointer-events: none;
+}
+.infinite-loading {
+    padding: 1rem 0;
+}
+.infinite-error {
+    padding: 1.5rem 1rem;
+    color: #bbb;
+}
+.infinite-error button {
+    /* Comfortable mobile tap target paired with inline error text. */
+    min-height: 44px;
+    padding: 0 0.75rem;
+    color: #ff8;
+}
+.infinite-end {
+    padding: 1.5rem 0;
+    font-size: 1.5rem;
+    opacity: 0.5;
+}
