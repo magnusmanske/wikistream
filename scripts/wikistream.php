@@ -517,46 +517,72 @@ class WikiStream
 			return;
 		}
 
-		# Cleanup
-		$qs = implode(",", $qs);
-		$sql = "DELETE FROM `section` WHERE `item_q` IN ($qs)";
-		$this->tfc->getSQL($this->db, $sql);
-		$sql = "DELETE FROM `file` WHERE `item_q` IN ($qs)";
-		$this->tfc->getSQL($this->db, $sql);
-
-		# Insert sections
-		if (count($sections) > 0) {
-			$sql =
-				"INSERT IGNORE INTO `section` (`item_q`,`property`,`section_q`) VALUES ";
-			$sql .= implode(",", $sections);
+		# Wrap all writes for this chunk in a single transaction. Reduces commit
+		# overhead on InnoDB from 6+ fsyncs to 1, and prevents partial-chunk
+		# state if a later write fails.
+		$this->beginTransaction();
+		try {
+			# Cleanup
+			$qs = implode(",", $qs);
+			$sql = "DELETE FROM `section` WHERE `item_q` IN ($qs)";
 			$this->tfc->getSQL($this->db, $sql);
-		}
-
-		# Insert item filed
-		if (count($entry_files) > 0) {
-			$sql =
-				"INSERT IGNORE INTO `file` (`item_q`,`property`,`key`,`is_trailer`) VALUES ";
-			$sql .= implode(",", $entry_files);
+			$sql = "DELETE FROM `file` WHERE `item_q` IN ($qs)";
 			$this->tfc->getSQL($this->db, $sql);
-		}
 
-		# Batched item upsert: one round-trip for the chunk instead of one per item.
-		# Rows that already exist (the expected case here, since we SELECTed from
-		# `item` WHERE available=0) get UPDATEd via ON DUPLICATE KEY UPDATE.
-		if (count($item_rows) > 0) {
-			$sql =
-				"INSERT INTO `item` (`q`,`title`,`year`,`minutes`,`image`,`sites`,`ts`) VALUES " .
-				implode(",", $item_rows) .
-				" ON DUPLICATE KEY UPDATE `title`=VALUES(`title`),`year`=VALUES(`year`),`minutes`=VALUES(`minutes`),`image`=VALUES(`image`),`sites`=VALUES(`sites`),`ts`=VALUES(`ts`)";
+			# Insert sections
+			if (count($sections) > 0) {
+				$sql =
+					"INSERT IGNORE INTO `section` (`item_q`,`property`,`section_q`) VALUES ";
+				$sql .= implode(",", $sections);
+				$this->tfc->getSQL($this->db, $sql);
+			}
+
+			# Insert item filed
+			if (count($entry_files) > 0) {
+				$sql =
+					"INSERT IGNORE INTO `file` (`item_q`,`property`,`key`,`is_trailer`) VALUES ";
+				$sql .= implode(",", $entry_files);
+				$this->tfc->getSQL($this->db, $sql);
+			}
+
+			# Batched item upsert: one round-trip for the chunk instead of one per item.
+			# Rows that already exist (the expected case here, since we SELECTed from
+			# `item` WHERE available=0) get UPDATEd via ON DUPLICATE KEY UPDATE.
+			if (count($item_rows) > 0) {
+				$sql =
+					"INSERT INTO `item` (`q`,`title`,`year`,`minutes`,`image`,`sites`,`ts`) VALUES " .
+					implode(",", $item_rows) .
+					" ON DUPLICATE KEY UPDATE `title`=VALUES(`title`),`year`=VALUES(`year`),`minutes`=VALUES(`minutes`),`image`=VALUES(`image`),`sites`=VALUES(`sites`),`ts`=VALUES(`ts`)";
+				$this->tfc->getSQL($this->db, $sql);
+			}
+
+			# Make item available
+			$sql = "UPDATE `item` SET `available`=1 WHERE `q` IN ($qs)";
 			$this->tfc->getSQL($this->db, $sql);
+
+			# Batched label refresh for the entire chunk
+			$this->update_item_labels_batch($items_for_labels);
+
+			$this->commit();
+		} catch (\Throwable $e) {
+			$this->rollback();
+			throw $e;
 		}
+	}
 
-		# Make item available
-		$sql = "UPDATE `item` SET `available`=1 WHERE `q` IN ($qs)";
-		$this->tfc->getSQL($this->db, $sql);
+	protected function beginTransaction(): void
+	{
+		$this->tfc->getSQL($this->db, "START TRANSACTION");
+	}
 
-		# Batched label refresh for the entire chunk
-		$this->update_item_labels_batch($items_for_labels);
+	protected function commit(): void
+	{
+		$this->tfc->getSQL($this->db, "COMMIT");
+	}
+
+	protected function rollback(): void
+	{
+		$this->tfc->getSQL($this->db, "ROLLBACK");
 	}
 
 	public function add_missing_item_details(): void
@@ -797,7 +823,17 @@ class WikiStream
 				}
 				$itemsBatch[] = $item;
 			}
-			$this->update_item_labels_batch($itemsBatch);
+			if (empty($itemsBatch)) {
+				continue;
+			}
+			$this->beginTransaction();
+			try {
+				$this->update_item_labels_batch($itemsBatch);
+				$this->commit();
+			} catch (\Throwable $e) {
+				$this->rollback();
+				throw $e;
+			}
 		}
 	}
 
@@ -1090,13 +1126,23 @@ class WikiStream
 				$personRows[] = "({$q},'{$label_safe}','{$gender_safe}',{$image_safe},$sites_safe)";
 				$itemsBatch[] = $item;
 			}
-			if (!empty($personRows)) {
-				$sql =
-					"INSERT IGNORE INTO `person` (`q`,`label`,`gender`,`image`,`sites`) VALUES " .
-					implode(",", $personRows);
-				$this->tfc->getSQL($this->db, $sql);
+			if (empty($personRows) && empty($itemsBatch)) {
+				continue;
 			}
-			$this->update_item_labels_batch($itemsBatch);
+			$this->beginTransaction();
+			try {
+				if (!empty($personRows)) {
+					$sql =
+						"INSERT IGNORE INTO `person` (`q`,`label`,`gender`,`image`,`sites`) VALUES " .
+						implode(",", $personRows);
+					$this->tfc->getSQL($this->db, $sql);
+				}
+				$this->update_item_labels_batch($itemsBatch);
+				$this->commit();
+			} catch (\Throwable $e) {
+				$this->rollback();
+				throw $e;
+			}
 		}
 	}
 
@@ -1585,27 +1631,34 @@ class WikiStream
 			return;
 		}
 
-		# Clear files
-		$sql = "DELETE FROM `file` WHERE item_q IN (" . implode(",", $qs) . ")";
-		$this->tfc->getSQL($this->db, $sql);
+		$this->beginTransaction();
+		try {
+			# Clear files
+			$sql = "DELETE FROM `file` WHERE item_q IN (" . implode(",", $qs) . ")";
+			$this->tfc->getSQL($this->db, $sql);
 
-		# Clear sections
-		$sql =
-			"DELETE FROM `section` WHERE item_q IN (" .
-			implode(",", $qs) .
-			") OR section_q IN (" .
-			implode(",", $qs) .
-			")";
-		$this->tfc->getSQL($this->db, $sql);
-		$sql =
-			"DELETE FROM `section` WHERE section_q IN (" .
-			implode(",", $this->config->bad_genres) .
-			") AND property=136";
-		$this->tfc->getSQL($this->db, $sql);
+			# Clear sections
+			$sql =
+				"DELETE FROM `section` WHERE item_q IN (" .
+				implode(",", $qs) .
+				") OR section_q IN (" .
+				implode(",", $qs) .
+				")";
+			$this->tfc->getSQL($this->db, $sql);
+			$sql =
+				"DELETE FROM `section` WHERE section_q IN (" .
+				implode(",", $this->config->bad_genres) .
+				") AND property=136";
+			$this->tfc->getSQL($this->db, $sql);
 
-		# Clear items
-		$sql = "DELETE FROM `item` WHERE q IN (" . implode(",", $qs) . ")";
-		$this->tfc->getSQL($this->db, $sql);
+			# Clear items
+			$sql = "DELETE FROM `item` WHERE q IN (" . implode(",", $qs) . ")";
+			$this->tfc->getSQL($this->db, $sql);
+			$this->commit();
+		} catch (\Throwable $e) {
+			$this->rollback();
+			throw $e;
+		}
 	}
 
 	// Returns the item for a property/file combination
