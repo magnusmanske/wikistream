@@ -313,8 +313,11 @@ class WikiStream
 
 	public function remove_unused_people(): void
 	{
+		// NOT EXISTS is preferred over NOT IN (subquery) on MariaDB — the
+		// optimiser handles index lookups directly, no full-table scan of
+		// the subquery's result set.
 		$sql =
-			"DELETE FROM person WHERE q NOT IN (SELECT DISTINCT section_q from section)";
+			"DELETE FROM person WHERE NOT EXISTS (SELECT 1 FROM section WHERE section.section_q = person.q)";
 		$this->tfc->getSQL($this->db, $sql);
 	}
 
@@ -802,11 +805,9 @@ class WikiStream
 	public function import_missing_section_labels(): void
 	{
 		$sql =
-			"SELECT `section_q` AS `q` FROM `section` WHERE `section_q` NOT IN (SELECT DISTINCT `q` FROM label)";
-		$sql .=
-			" UNION SELECT `q` FROM `item` WHERE `q` NOT IN (SELECT DISTINCT `q` FROM label)";
-		$sql .=
-			" UNION SELECT `q` FROM `person` WHERE `q` NOT IN (SELECT DISTINCT `q` FROM label)";
+			"SELECT DISTINCT `section_q` AS `q` FROM `section` WHERE NOT EXISTS (SELECT 1 FROM `label` WHERE `label`.`q` = `section`.`section_q`)" .
+			" UNION SELECT `q` FROM `item` WHERE NOT EXISTS (SELECT 1 FROM `label` WHERE `label`.`q` = `item`.`q`)" .
+			" UNION SELECT `q` FROM `person` WHERE NOT EXISTS (SELECT 1 FROM `label` WHERE `label`.`q` = `person`.`q`)";
 		$result = $this->tfc->getSQL($this->db, $sql);
 		$qs = [];
 		while ($o = $result->fetch_object()) {
@@ -1091,7 +1092,7 @@ class WikiStream
 		$sql =
 			"SELECT DISTINCT `section_q` FROM `section` WHERE `property` IN (" .
 			implode(",", $this->config->people_props) .
-			") AND `section_q` NOT IN (SELECT `q` FROM `person`)";
+			") AND NOT EXISTS (SELECT 1 FROM `person` WHERE `person`.`q` = `section`.`section_q`)";
 		$result = $this->tfc->getSQL($this->db, $sql);
 		$qs = [];
 		while ($o = $result->fetch_object()) {
@@ -1254,11 +1255,19 @@ class WikiStream
 
 	public function purge_items_without_files(): void
 	{
-		$sql =
-			"DELETE FROM section WHERE item_q NOT IN (SELECT item_q FROM `file`)";
-		$this->tfc->getSQL($this->db, $sql);
-		$sql = "DELETE FROM item WHERE q NOT IN (SELECT item_q FROM `file`)";
-		$this->tfc->getSQL($this->db, $sql);
+		// NOT EXISTS form. Section must be cleared before item due to the
+		// FK section.item_q → item.q.
+		$this->beginTransaction();
+		try {
+			$sql = "DELETE FROM `section` WHERE NOT EXISTS (SELECT 1 FROM `file` WHERE `file`.`item_q` = `section`.`item_q`)";
+			$this->tfc->getSQL($this->db, $sql);
+			$sql = "DELETE FROM `item` WHERE NOT EXISTS (SELECT 1 FROM `file` WHERE `file`.`item_q` = `item`.`q`)";
+			$this->tfc->getSQL($this->db, $sql);
+			$this->commit();
+		} catch (\Throwable $e) {
+			$this->rollback();
+			throw $e;
+		}
 	}
 
 	private static function parse_seconds(string $s): int
