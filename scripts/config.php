@@ -42,7 +42,11 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig
 	public $bad_genres = [185529, 4373044, 3461143, 599558]; # P136
 	public $sparql = [
 		"SELECT DISTINCT ?q {
-			?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P6216 wd:Q19652 .
+			?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P6216/(wdt:P279*) wd:Q19652 .
+			# P279* below Q19652 also catches PD-equivalent subclasses
+			# like Q88088423 (copyrighted, dedicated to the public domain
+			# by copyright holder). The base case wdt:P6216 wd:Q19652 is
+			# still matched because P279* allows zero hops.
 			MINUS { ?q wdt:P31 wd:Q97570383 } # Glass positive
 			OPTIONAL { ?q wdt:P724 ?ia }
 			OPTIONAL { ?q wdt:P10 ?commons }
@@ -69,6 +73,32 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig
 			BIND(ABS(?ia_duration/?duration*100) AS ?percent)
 			FILTER(?percent>=60 && ?percent<=150) # that is similar to the item duration
 			?q wdt:P577 ?date . FILTER (year(?date)<=1928) # 1928 or earlier
+		}",
+		# Films licensed under any Creative Commons licence except CC-*-ND.
+		# A film qualifies when at least one P275 statement points to a CC
+		# licence (instance of Q284742). The ND exclusion is dynamic: any
+		# P275 value whose English label contains "noderiv" disqualifies
+		# the film, which covers BY-ND and BY-NC-ND across all versions
+		# and jurisdictional variants without needing a hand-maintained
+		# Q-ID list. CC-*-NC variants are intentionally allowed.
+		"SELECT DISTINCT ?q {
+			?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; # A film
+			   wdt:P275 ?lic .                   # with a licence claim
+			?lic wdt:P31 wd:Q284742 .            # licence is a Creative Commons licence
+			MINUS { ?q wdt:P31 wd:Q97570383 } # Glass positive
+			MINUS {
+				?q wdt:P275 ?nd_lic .
+				?nd_lic rdfs:label ?nd_label .
+				FILTER(LANG(?nd_label) = \"en\")
+				FILTER(CONTAINS(LCASE(?nd_label), \"noderiv\"))
+			}
+			OPTIONAL { ?q wdt:P724 ?ia }
+			OPTIONAL { ?q wdt:P10 ?commons }
+			OPTIONAL { ?q wdt:P1651 ?youtube }
+			OPTIONAL { ?q wdt:P4015 ?vimeo }
+			OPTIONAL { ?q wdt:P11731 ?dailymotion }
+			BIND(BOUND(?ia)||BOUND(?commons)||BOUND(?youtube)||BOUND(?vimeo)||BOUND(?dailymotion) as ?hasMedia)
+			FILTER(?hasMedia=true)
 		}",
 	];
 	public $people_props = [161, 57];
