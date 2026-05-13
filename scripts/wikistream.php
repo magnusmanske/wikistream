@@ -179,43 +179,88 @@ class WikiStream
 
 	public function import_commons_video_minutes(): void
 	{
-		$sql = "SELECT * FROM `file` WHERE `property`=10 AND `minutes` IS NULL";
+		$sql = "SELECT `id`, `key` FROM `file` WHERE `property`=10 AND `minutes` IS NULL";
 		$result = $this->tfc->getSQL($this->db, $sql);
+		// Collect (id, key) rows first so we can chunk and batch-fetch.
+		$rows = [];
 		while ($o = $result->fetch_object()) {
-			$minutes = null;
+			$rows[] = $o;
+		}
+		if (empty($rows)) {
+			return;
+		}
+
+		// Commons API: up to 50 titles per request via titles=A|B|C.
+		// Build a map from canonical title (spaces, no "File:" prefix) → file row,
+		// so we can match the API's normalized response title back to the row.
+		foreach (array_chunk($rows, 50) as $chunk) {
+			$rowsByCanonical = []; // canonical title → list of file rows (in case of duplicate keys)
+			$titles = [];
+			$seenKeys = [];
+			foreach ($chunk as $o) {
+				$canonical = str_replace("_", " ", $o->key);
+				$rowsByCanonical[$canonical][] = $o;
+				if (!isset($seenKeys[$o->key])) {
+					$titles[] = "File:" . $o->key;
+					$seenKeys[$o->key] = true;
+				}
+			}
+			// Per-title urlencode then join with the literal pipe character.
+			$titlesParam = implode("|", array_map("urlencode", $titles));
 			$url =
-				"https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=metadata&&titles=File:" .
-				urlencode($o->key);
+				"https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=metadata&titles=" .
+				$titlesParam;
 			$j = $this->get_json_from_url($url);
-			if (!isset($j) or !isset($j->query->pages)) {
+			if (!isset($j) || !isset($j->query) || !isset($j->query->pages)) {
 				continue;
-			} // TODO error message
+			}
+
 			foreach ($j->query->pages as $page) {
+				if (!isset($page) || !isset($page->title)) {
+					continue;
+				}
 				if (
-					!isset($page) or
-					!isset($page->imageinfo) or
-					!isset($page->imageinfo[0]) or
+					!isset($page->imageinfo) ||
+					!isset($page->imageinfo[0]) ||
 					!isset($page->imageinfo[0]->metadata)
 				) {
 					continue;
 				}
+
+				$pageTitle = $page->title;
+				if (strpos($pageTitle, "File:") === 0) {
+					$pageTitle = substr($pageTitle, 5);
+				}
+				$matchingRows = $rowsByCanonical[$pageTitle] ?? [];
+				if (empty($matchingRows)) {
+					continue;
+				}
+
+				$minutes = null;
 				foreach ($page->imageinfo[0]->metadata as $m) {
+					if (!isset($m->name) || !isset($m->value)) {
+						continue;
+					}
 					if ($m->name == "playtime_seconds") {
 						$minutes = round($m->value / 60);
 					} elseif ($m->name == "playtime_minutes") {
-						$minutes = round($m->value * 1);
+						$minutes = round((float) $m->value);
 					} elseif ($m->name == "length") {
 						$minutes = round($m->value / 60);
 					} elseif ($m->name == "duration") {
 						$minutes = round($m->value / 60);
 					}
 				}
+				if ($minutes === null) {
+					continue;
+				}
+				$minutes_safe = (int) $minutes;
+				foreach ($matchingRows as $row) {
+					$id_safe = (int) $row->id;
+					$sql = "UPDATE `file` SET `minutes`={$minutes_safe} WHERE id={$id_safe} AND `minutes` IS NULL";
+					$this->tfc->getSQL($this->db, $sql);
+				}
 			}
-			if ($minutes === null) {
-				continue;
-			}
-			$sql = "UPDATE `file` SET `minutes`={$minutes} WHERE id={$o->id} AND `minutes` IS NULL";
-			$this->tfc->getSQL($this->db, $sql);
 		}
 	}
 

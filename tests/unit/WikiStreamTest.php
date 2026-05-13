@@ -466,4 +466,108 @@ final class WikiStreamTest extends TestCase
 
         $this->assertSame(0, $ws->get_total_candidate_items());
     }
+
+    // ------------------------------------------------------------------
+    // import_commons_video_minutes — batched titles, title-normalisation,
+    // duplicate-key handling
+    // ------------------------------------------------------------------
+
+    public function test_import_commons_video_minutes_batches_titles_and_maps_back(): void
+    {
+        // Two rows. Note row #1 has an underscore in its key — the API returns
+        // titles with spaces, so the canonical mapping must handle it.
+        $row1 = (object) ['id' => 101, 'key' => 'My_Movie.webm'];
+        $row2 = (object) ['id' => 102, 'key' => 'Other Film.ogv'];
+
+        // Commons response for the batched titles=A|B call.
+        $apiResponse = (object) [
+            'query' => (object) [
+                'pages' => (object) [
+                    '1' => (object) [
+                        'title' => 'File:My Movie.webm', // normalised from underscore
+                        'imageinfo' => [(object) [
+                            'metadata' => [
+                                (object) ['name' => 'playtime_seconds', 'value' => '120'],
+                            ],
+                        ]],
+                    ],
+                    '2' => (object) [
+                        'title' => 'File:Other Film.ogv',
+                        'imageinfo' => [(object) [
+                            'metadata' => [
+                                (object) ['name' => 'length', 'value' => '300'],
+                            ],
+                        ]],
+                    ],
+                ],
+            ],
+        ];
+
+        $httpClient = $this->createMock(\HttpClientInterface::class);
+        $httpClient->expects($this->once())
+            ->method('getJson')
+            ->with($this->stringContains('titles='))
+            ->willReturn($apiResponse);
+
+        [$ws, $tfc] = $this->makeWikiStream(httpClient: $httpClient);
+
+        $selectResult = $this->makeResult([$row1, $row2]);
+        $updates = [];
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use ($selectResult, &$updates) {
+                if (stripos($sql, 'SELECT') === 0) {
+                    return $selectResult;
+                }
+                $updates[] = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->import_commons_video_minutes();
+
+        // playtime_seconds 120 → 2 min for id 101; length 300 → 5 min for id 102.
+        $this->assertCount(2, $updates);
+        $this->assertMatchesRegularExpression('/`minutes`=2 .* id=101/', $updates[0]);
+        $this->assertMatchesRegularExpression('/`minutes`=5 .* id=102/', $updates[1]);
+    }
+
+    public function test_import_commons_video_minutes_skips_missing_imageinfo(): void
+    {
+        $row = (object) ['id' => 10, 'key' => 'Missing.webm'];
+        $apiResponse = (object) [
+            'query' => (object) [
+                'pages' => (object) [
+                    '-1' => (object) ['title' => 'File:Missing.webm'], // no imageinfo
+                ],
+            ],
+        ];
+        $httpClient = $this->createMock(\HttpClientInterface::class);
+        $httpClient->method('getJson')->willReturn($apiResponse);
+
+        [$ws, $tfc] = $this->makeWikiStream(httpClient: $httpClient);
+
+        $selectResult = $this->makeResult([$row]);
+        $updates = [];
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use ($selectResult, &$updates) {
+                if (stripos($sql, 'SELECT') === 0) {
+                    return $selectResult;
+                }
+                $updates[] = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->import_commons_video_minutes();
+        $this->assertSame([], $updates);
+    }
+
+    public function test_import_commons_video_minutes_no_rows_skips_http(): void
+    {
+        $httpClient = $this->createMock(\HttpClientInterface::class);
+        $httpClient->expects($this->never())->method('getJson');
+
+        [$ws, $tfc] = $this->makeWikiStream(httpClient: $httpClient);
+        $tfc->method('getSQL')->willReturn($this->emptyResult());
+
+        $ws->import_commons_video_minutes();
+    }
 }
