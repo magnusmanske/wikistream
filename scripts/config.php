@@ -18,6 +18,16 @@
 		}
 		die("Unknown site mode");
 	}
+
+	/**
+	 * Tool-specific dispatch for WikiStream::get_special_entries(). Override
+	 * in a subclass to add custom pseudo-section keys (e.g. "female_directors"
+	 * in WikiFlix). The base implementation returns an empty list.
+	 */
+	public function get_special_entries(&$ws, string $key, int $max = PHP_INT_MAX): array
+	{
+		return [];
+	}
 }
 
 class WikiStreamConfigWikiFlix extends WikiStreamConfig
@@ -75,9 +85,20 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig
 	public function add_special_sections(&$ws, &$out): void
 	{
 		$out["sections"][] = [
+			"key" => "female_directors",
+			"title_key" => "female_directors",
 			"title" => "Female directors",
 			"entries" => $this->get_items_by_female_directors($ws, 25),
 		];
+	}
+
+	public function get_special_entries(&$ws, string $key, int $max = PHP_INT_MAX): array
+	{
+		switch ($key) {
+			case "female_directors":
+				return $this->get_items_by_female_directors($ws, $max);
+		}
+		return [];
 	}
 
 	protected function get_items_by_female_directors(

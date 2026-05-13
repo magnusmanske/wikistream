@@ -553,6 +553,26 @@ class WikiStream
 		return $this->get_item_view("vw_recently_added", $num, $section_q);
 	}
 
+	/**
+	 * Look up entries for a "pseudo-section" — one of the main-page rows
+	 * that isn't backed by a Wikidata Q-id (e.g. "Recently edited",
+	 * "Highly ranked"). Built-in keys are handled here; tool-specific
+	 * keys (e.g. WikiFlix's "Female directors") are delegated to the
+	 * config class.
+	 */
+	public function get_special_entries(string $key, int $max = PHP_INT_MAX): array
+	{
+		switch ($key) {
+			case "recently_edited":
+				return $this->get_recently_added($max);
+			case "highly_ranked":
+				return $this->get_ranked_items($max);
+			case "popular_entries":
+				return $this->get_item_view("vw_popular_entries", $max);
+		}
+		return $this->config->get_special_entries($this, $key, $max);
+	}
+
 	public function get_ranked_items($num = 25, $section_q = null): array
 	{
 		return $this->get_item_view(
@@ -768,14 +788,17 @@ class WikiStream
 		$out = ["status" => "OK"];
 		$out["sections"] = [];
 		$out["sections"][] = [
+			"key" => "recently_edited",
 			"title_key" => "recently_edited",
 			"entries" => $this->get_recently_added(25),
 		];
 		$out["sections"][] = [
+			"key" => "highly_ranked",
 			"title_key" => "highly_ranked",
 			"entries" => $this->get_ranked_items(25),
 		];
 		$out["sections"][] = [
+			"key" => "popular_entries",
 			"title_key" => "popular_entries",
 			"entries" => $this->get_item_view(
 				"vw_popular_entries",

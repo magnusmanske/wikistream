@@ -18,6 +18,7 @@ export default {
 
         const { items: recentlyViewed } = useRecentlyViewed();
         const recentSection = computed(() => ({
+            key: 'recently_viewed',
             title_key: 'recently_viewed',
             title: 'Recently viewed',
             entries: recentlyViewed.value,
@@ -34,8 +35,8 @@ export default {
             <page-header></page-header>
             <div class="row">
                 <div style="width:100%;">
-                    <section-row v-if="hasRecent" :section="recentSection" nolink="1"></section-row>
-                    <section-row v-for="section in sections" :key="section.title" :section="section"></section-row>
+                    <section-row v-if="hasRecent" :section="recentSection"></section-row>
+                    <section-row v-for="section in sections" :key="section.title_key || section.title" :section="section"></section-row>
                 </div>
             </div>
         </div>

@@ -34,6 +34,14 @@ if ( $action=='get_entry' ) {
 	}
 } else if ( $action=='get_random_entry' ) {
 	$out['data'] = [ 'q' => $ws->getRandomEntryQ() ];
+} else if ( $action=='get_special' ) {
+	$key = preg_replace('|[^a-z_]|','',$ws->tfc->getRequest('key',''));
+	$max = $ws->tfc->getRequest('max','all');
+	$max = ($max==='all') ? PHP_INT_MAX : (int) $max;
+	$out['data'] = [
+		'key' => $key,
+		'entries' => $key === '' ? [] : $ws->get_special_entries($key, $max),
+	];
 } else if ( $action=='get_all_sections' ) {
 	$out['data'] = $ws->get_top_sections(PHP_INT_MAX);
 } else if ( $action=='get_your_list' ) {
@@ -101,7 +109,8 @@ if ( $action=='get_entry' ) {
 # - State-changing / per-user-write / randomised / log endpoints are never
 #   cached.
 $public_cacheable  = [ 'get_all_sections', 'get_section', 'get_person',
-                       'get_items_by_year', 'get_candidate_items', 'search' ];
+                       'get_items_by_year', 'get_candidate_items', 'search',
+                       'get_special' ];
 $private_cacheable = [ 'get_entry' ];
 if ( in_array($action, $public_cacheable,  true) ) {
 	header('Cache-Control: public, max-age=300');

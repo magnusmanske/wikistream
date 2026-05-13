@@ -11,6 +11,7 @@ import PlayPage       from './pages/play-page.js';
 import SearchPage     from './pages/search-page.js';
 import SectionsPage   from './pages/sections-page.js';
 import SectionPage    from './pages/section-page.js';
+import SpecialPage    from './pages/special-page.js';
 import PersonPage     from './pages/person-page.js';
 import CandidatesPage from './pages/candidates-page.js';
 import YearPage       from './pages/year-page.js';
@@ -25,6 +26,9 @@ export const routes = [
     { path: '/sections',                          component: SectionsPage,   props: true },
     { path: '/section/:section_q',                component: SectionPage,    props: true },
     { path: '/section/:section_q/:section_prop',  component: SectionPage,    props: true },
+    // `key` is reserved by Vue, so map the route param to a renamed prop.
+    { path: '/special/:key',                      component: SpecialPage,
+      props: (route) => ({ specialKey: route.params.key }) },
     { path: '/person/:q',                         component: PersonPage,     props: true },
     { path: '/candidates',                        component: CandidatesPage, props: true },
     { path: '/candidates/:offset',                component: CandidatesPage, props: true },
