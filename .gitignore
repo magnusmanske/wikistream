@@ -4,5 +4,6 @@
 public_html/php
 public_html/resources
 public_html/config.js
+public_html/config.json
 .claude
 audits/
