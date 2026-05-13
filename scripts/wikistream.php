@@ -355,7 +355,8 @@ class WikiStream
 		&$qs,
 		&$sections,
 		&$entry_files,
-		&$items_for_labels = null
+		&$items_for_labels = null,
+		&$item_rows = null
 	): void {
 		$item = $wil->getItem($item_q_numeric);
 		if (!isset($item)) {
@@ -470,8 +471,15 @@ class WikiStream
 
 		$year_safe = $this->get_earliest_year($item, "P577");
 		$title_safe = $this->db->real_escape_string($item->getLabel());
-		$sql = "UPDATE `item` set `title`='{$title_safe}',`year`={$year_safe},`minutes`={$minutes_safe},`image`={$image_safe},`sites`={$sites_safe},`ts`='{$ts_safe}' WHERE `q`={$item_q_numeric}";
-		$this->tfc->getSQL($this->db, $sql);
+
+		// Defer the item UPDATE so the caller can issue one batched
+		// INSERT ... ON DUPLICATE KEY UPDATE for the whole chunk.
+		if (is_array($item_rows)) {
+			$item_rows[] = "({$item_q_numeric},'{$title_safe}',{$year_safe},{$minutes_safe},{$image_safe},{$sites_safe},'{$ts_safe}')";
+		} else {
+			$sql = "UPDATE `item` set `title`='{$title_safe}',`year`={$year_safe},`minutes`={$minutes_safe},`image`={$image_safe},`sites`={$sites_safe},`ts`='{$ts_safe}' WHERE `q`={$item_q_numeric}";
+			$this->tfc->getSQL($this->db, $sql);
+		}
 
 		// Defer label refresh — caller batches via update_item_labels_batch().
 		if (is_array($items_for_labels)) {
@@ -489,6 +497,7 @@ class WikiStream
 		$sections = [];
 		$entry_files = [];
 		$items_for_labels = [];
+		$item_rows = [];
 		foreach ($chunk as $q_numeric) {
 			try {
 				$this->add_item_details(
@@ -498,6 +507,7 @@ class WikiStream
 					$sections,
 					$entry_files,
 					$items_for_labels,
+					$item_rows,
 				);
 			} catch (Exception $e) {
 				// print "Filtered out {$q_numeric} for bad genre\n";
@@ -527,6 +537,17 @@ class WikiStream
 			$sql =
 				"INSERT IGNORE INTO `file` (`item_q`,`property`,`key`,`is_trailer`) VALUES ";
 			$sql .= implode(",", $entry_files);
+			$this->tfc->getSQL($this->db, $sql);
+		}
+
+		# Batched item upsert: one round-trip for the chunk instead of one per item.
+		# Rows that already exist (the expected case here, since we SELECTed from
+		# `item` WHERE available=0) get UPDATEd via ON DUPLICATE KEY UPDATE.
+		if (count($item_rows) > 0) {
+			$sql =
+				"INSERT INTO `item` (`q`,`title`,`year`,`minutes`,`image`,`sites`,`ts`) VALUES " .
+				implode(",", $item_rows) .
+				" ON DUPLICATE KEY UPDATE `title`=VALUES(`title`),`year`=VALUES(`year`),`minutes`=VALUES(`minutes`),`image`=VALUES(`image`),`sites`=VALUES(`sites`),`ts`=VALUES(`ts`)";
 			$this->tfc->getSQL($this->db, $sql);
 		}
 
