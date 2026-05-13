@@ -1,16 +1,10 @@
 /**
- * Bootstrap for the Vue 2.7 + Composition API build.
+ * Bootstrap for the SPA (Vue 2.7 + Composition API + ES modules).
  *
  * Loads the wikistream-specific components, registers shared Magnus-tools
  * components via the existing `vue_es6/index.js` barrel, initialises
- * shared state (WikiData + ToolTranslation), and mounts the app.
- *
- * Sibling `index.es6.html` loads this as a module.
- *
- * Migration note: this file replaces `public_html/vue.js` in the new build.
- * Once the new build is verified, the legacy `vue.js` + the `.html` files
- * under `vue_components/` can be deleted and `index.html` swapped for
- * `index.es6.html`.
+ * shared state (WikiData + ToolTranslation), wires up the router, and
+ * mounts the app. Loaded as an ES module by `public_html/index.html`.
  */
 
 import { setWd, setWidarApiUrl } from '../resources/vue_es6/state.js';
@@ -26,14 +20,14 @@ import { createRouter } from './router.js';
 
 // 1. Initialise shared state.
 //    `WikiData` and `window.config` come from the classic <script> tags
-//    in index.es6.html (wikidata.js + config.js, both loaded before this).
+//    in index.html (wikidata.js + config.js, both loaded before this).
 setWd(new WikiData());
 initToolTranslate(window.config?.misc?.toolname || undefined);
 
 // Point the shared <widar> component at our own api.php, which proxies
 // Widar requests on the server side (see api.php lines 14–17). Without
 // this, widar.js falls back to '/widar/index.php' — which 404s on the
-// tool's subdomain. Mirrors the legacy `vue.js` line `widar_api_url = …`.
+// tool's subdomain.
 const _toolname = window.config?.misc?.toolname;
 setWidarApiUrl(
     _toolname ? `https://${_toolname}.toolforge.org/api.php` : './api.php',

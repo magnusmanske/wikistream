@@ -38,8 +38,17 @@ This single codebase powers two Toolforge tools — **WikiFlix** (films) and **W
 
 1. **`scripts/wikistream.php` — the `WikiStream` class.** ~1500 lines, all DB queries and business logic. Constructor takes a config, a `ToolforgeCommon` (optional, defaults to a fresh one), and an `HttpClientInterface` (optional, defaults to `CurlHttpClient`). The HTTP client is injectable specifically so tests can avoid real network calls.
 2. **`public_html/api.php` — thin JSON dispatcher.** Reads `action` from the request and calls the corresponding `WikiStream` method. Handles Widar (OAuth) auth for actions that need a user identity (`get_your_list`, `set_user_item_list`, etc.). Adding a new endpoint = adding a new `action` branch here.
-3. **`public_html/index.html` + `vue.js` + `vue_components/*.html` — Vue 2 SPA.** Uses vue-router with `:key="$route.path"` so each route remounts. All AJAX goes through `api.php`. Shared Magnus-tools libraries (jQuery, `wikidata.js`, `tt.js`, `shared.js`) are loaded from `tools-static.wmflabs.org` — not vendored.
+3. **`public_html/index.html` + `vue_components/main.js` + `vue_components/{pages,components,composables}/*.js` — Vue 2.7 SPA, Composition API, ES modules.** `main.js` bootstraps the app (mounts on `#app`, sets up vue-router with `:key="$route.path"` so each route remounts). All AJAX goes through `api.php`. Shared Magnus-tools libraries (jQuery, `tt.js`, `wikidata.js`) are loaded as classic scripts from `tools-static.wmflabs.org`; Vue components from the shared library (`<wd-link>`, `<commons-thumbnail>`, `<widar>`, …) are ES-module imports under `public_html/resources/vue_es6/`. Wikistream-local CSS lives in `public_html/styles.css`.
 4. **`public_html/config.js`** is **generated** by `scripts/update.php` (`generate_main_page_data`). Don't hand-edit it. It supplies UI-side config and main-page section data.
+
+### Adding to the SPA
+
+- **New page** — create `public_html/vue_components/pages/<name>.js`, then add a route in `public_html/vue_components/router.js`. Use `setup()` for state/effects; keep an Options-API `methods:` block for anything that needs `this.$router`.
+- **New shared widget** — create `public_html/vue_components/components/<name>.js`, then register globally in `public_html/vue_components/main.js` (`Vue.component('my-widget', MyWidget)`).
+- **New composable** — `public_html/vue_components/composables/use<Name>.js`; export a factory function.
+- **Translated text** — apply `mixins: [ttMixin]` (from `resources/vue_es6/state.js`). The mixin calls `state.tt.updateInterface(this.$el)` on `mounted`/`updated`, so `tt` and `tt_title` attributes in templates are resolved automatically.
+- **Shared Magnus-tools components** (`<wd-link>`, `<commons-thumbnail>`, `<widar>`, `<wd-date>`, `<typeahead-search>`, …) are already registered globally via `registerAll(Vue)` in `main.js`. Use them in templates without importing.
+- **CSS** — wikistream-specific styles go in `public_html/styles.css` (loaded by `index.html`). Component-specific rules should be class-prefixed to avoid leakage.
 
 ### Toolforge dependencies and the test bootstrap
 
@@ -56,6 +65,6 @@ Schema in `scripts/db.sql`. Production uses MariaDB on Toolforge (`wikiflix_p` /
 
 ### Data flow for a typical request
 
-`browser → vue.js → $.getJSON('api.php?action=...') → api.php switch → WikiStream method → ToolforgeCommon::getSQL → MariaDB → JSON response → Vue component`
+`browser → vue_components/main.js + page component → fetch('api.php?action=...') → api.php switch → WikiStream method → ToolforgeCommon::getSQL → MariaDB → JSON response → Vue component`
 
 Background data ingestion is the opposite direction: `scripts/update.php` (cron, hourly) → SPARQL/Wiki APIs → DB → regenerates `config.js`.

@@ -4,8 +4,6 @@
  *
  * Prefers the user's language; falls back to English. Resolves to '' on
  * any failure or missing link.
- *
- * Replaces the `wikipediaDescriptionMixin` from `public_html/vue.js`.
  */
 
 import { state } from '../../resources/vue_es6/state.js';
