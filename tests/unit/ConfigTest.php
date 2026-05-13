@@ -92,6 +92,37 @@ final class ConfigTest extends TestCase
         $this->assertStringContainsString('Q97570383', $query1, 'Glass-positive exclusion must remain in query #1.');
     }
 
+    /**
+     * A2: a fourth SPARQL query must catch films released under any
+     * Creative Commons licence (P275 → instance of Q284742) except for
+     * any CC-*-ND variant. The ND exclusion is done dynamically via a
+     * label-contains-"noderiv" filter to remain robust against new
+     * jurisdictional ND variants being added to Wikidata.
+     */
+    public function test_wikiflix_has_cc_license_query(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+
+        $this->assertGreaterThanOrEqual(
+            4,
+            count($config->sparql),
+            'WikiFlix must have a fourth SPARQL query for CC-licensed films.'
+        );
+
+        $query = $config->sparql[3];
+
+        $this->assertStringContainsString('wdt:P275', $query, 'CC-license query must filter on P275.');
+        $this->assertStringContainsString('wd:Q284742', $query, 'CC-license query must require the P275 value to be a Creative Commons license (Q284742).');
+        $this->assertStringContainsString('wd:Q11424', $query, 'CC-license query must restrict to films (Q11424).');
+        $this->assertMatchesRegularExpression(
+            '/noderiv/i',
+            $query,
+            'CC-license query must exclude NoDerivatives variants.'
+        );
+        // Same media-availability shape as query #1
+        $this->assertStringContainsString('hasMedia', $query, 'CC-license query must use the hasMedia filter shape.');
+    }
+
     public function test_wikiflix_bad_genres_are_integers(): void
     {
         $config = new \WikiStreamConfigWikiFlix();
