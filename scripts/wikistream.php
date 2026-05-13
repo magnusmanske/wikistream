@@ -1,6 +1,14 @@
 <?php // $_SERVER['HOME'].
-require_once __DIR__ . "/../public_html/php/ToolforgeCommon.php";
-require_once __DIR__ . "/../public_html/php/wikidata.php";
+// Guard the shared-library requires with class_exists so test bootstraps can
+// pre-declare stubs for ToolforgeCommon / WikidataItem / WikidataItemList
+// (see tests/bootstrap.php) without triggering a class-redeclaration fatal.
+// In production, the classes are not yet declared and the requires fire normally.
+if (!class_exists('ToolforgeCommon')) {
+	require_once __DIR__ . "/../public_html/php/ToolforgeCommon.php";
+}
+if (!class_exists('WikidataItem') || !class_exists('WikidataItemList')) {
+	require_once __DIR__ . "/../public_html/php/wikidata.php";
+}
 require_once __DIR__ . "/../scripts/config.php";
 require_once __DIR__ . "/../scripts/HttpClient.php";
 
