@@ -28,6 +28,10 @@ export default {
 		const cast = ref([]);
 		const tags = ref([]);
 		const description = ref('');
+		// Map of Q-id → Commons filename (P18) for everyone listed in the
+		// associated_people section. Populated asynchronously after the entry
+		// item loads; missing entries simply render without a thumbnail.
+		const person_images = ref({});
 
 		const cfg = window.config || {};
 
@@ -68,10 +72,36 @@ export default {
 				loadWikipediaDescription(entryQ, 'en').then((d) => {
 					if (d) description.value = d;
 				});
+
+				// 4. Pre-load associated people's Wikidata items so we can
+				//    show their portrait (P18) inline. Fire-and-forget.
+				loadAssociatedPeopleImages();
 			} else {
 				loading.value = false;
 			}
 		});
+
+		function loadAssociatedPeopleImages() {
+			if (!item.value) return;
+			const qs = [];
+			associated_people_props.value.forEach((prop) => {
+				if (!item.value.hasClaims(`P${prop}`)) return;
+				item.value.getTargets(`P${prop}`).forEach((q) => {
+					if (!qs.includes(q)) qs.push(q);
+				});
+			});
+			if (qs.length === 0) return;
+			state.wd.getItemBatch(qs, () => {
+				const next = { ...person_images.value };
+				qs.forEach((q) => {
+					const i = state.wd.getItem(q);
+					if (!i) return;
+					const img = i.getFirstStringForProperty('P18');
+					if (img) next[q] = img;
+				});
+				person_images.value = next;
+			});
+		}
 
 		function add_tags() {
 			if (!item.value) return;
@@ -139,7 +169,7 @@ export default {
 		}
 
 		return {
-			loading, item, entry, cast, tags, description,
+			loading, item, entry, cast, tags, description, person_images,
 			associated_people_props, social,
 		};
 	},
@@ -223,10 +253,11 @@ export default {
                                 </div>
                             </div>
                             <div v-for="person_prop in associated_people_props" :key="person_prop">
-                                <div v-if='item.hasClaims("P"+person_prop)' style="display: flex; margin-bottom: 0.5rem">
+                                <div v-if='item.hasClaims("P"+person_prop)' style="display: flex; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem">
                                     <span><wd-link :item='"P"+person_prop' as_text="1" class="fluc"></wd-link></span>
-                                    <span v-for='q in item.getTargets("P"+person_prop)' :key="q" style="margin-left: 0.5rem">
-                                        <router-link :to='"/person/"+q.replace(/\\D/g,"")'>
+                                    <span v-for='q in item.getTargets("P"+person_prop)' :key="q" style="margin-left: 0.5rem; display: inline-flex; align-items: center;">
+                                        <router-link :to='"/person/"+q.replace(/\\D/g,"")' style="display: inline-flex; align-items: center; gap: 0.3rem; color: inherit;">
+                                            <commons-thumbnail v-if="person_images[q]" :filename="person_images[q]" nolink="1" loading="lazy" width="40" height="40"></commons-thumbnail>
                                             <wd-link :item="q" as_text="1"></wd-link>
                                         </router-link>
                                     </span>
