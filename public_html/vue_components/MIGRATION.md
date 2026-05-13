@@ -17,7 +17,7 @@ against a deployed `config.json`, then the switchover.
 | `entry-thumb.html`       | ✅ Ported  | `components/entry-thumb.js`                    |
 | `person-thumb.html`      | ✅ Ported  | `components/person-thumb.js`                   |
 | `section-row.html`       | ✅ Ported  | `components/section-row.js`                    |
-| `batch-navigator` (shared, not in `resources/vue_es6/`) | ✅ New local impl | `components/batch-navigator.js` |
+| `batch-navigator` (shared, Vue 2 only) | ✅ Replaced | uses `resources/vue_es6/pagination.js` instead |
 | `main-page.html`         | ✅ Ported  | `pages/main-page.js`                           |
 | `entry-page.html`        | ✅ Ported  | `pages/entry-page.js`                          |
 | `play-page.html`         | ✅ Ported  | `pages/play-page.js`                           |
@@ -39,7 +39,6 @@ public_html/
     ├── main.js               app bootstrap (replaces public_html/vue.js)
     ├── router.js             route table
     ├── components/           cross-page widgets
-    │   ├── batch-navigator.js
     │   ├── entry-thumb.js
     │   ├── page-header.js
     │   ├── person-thumb.js
@@ -103,12 +102,26 @@ The legacy code used `$(this.$el).find(...)` for DOM access and
 - jQuery is still loaded for the shared library (Bootstrap, plus the
   shared library itself). It's not used in any new wikistream code.
 
-### `batch-navigator` — local replacement
+### Pagination
 
-The original was a Magnus-tools shared component that isn't in
-`vue_es6/`. A minimal local replacement lives at
-`components/batch-navigator.js` with the same prop/event contract
-(`batch_size`, `total`, `current` + `set-current` event).
+The legacy `<batch-navigator>` (Vue 2 shared component, not in `vue_es6/`)
+has been replaced by the shared `<pagination>` component from
+`resources/vue_es6/pagination.js`. It's registered directly in `main.js`
+because `registerAll(Vue)` doesn't include it.
+
+Prop/event differences from the old `<batch-navigator>`:
+
+| `<batch-navigator>`           | `<pagination>`                |
+|-------------------------------|-------------------------------|
+| `:batch_size`                 | `:items-per-page`             |
+| `:total`                      | `:total`                      |
+| `:current` (0-based batch idx) | `:offset` (item offset)       |
+| `@set-current` → batch idx    | `@go-to-page` → item offset   |
+
+The shared component uses Bootstrap Icons classes (`bi bi-chevron-…`),
+so `index.es6.html` loads `bootstrap-icons` from cdnjs. The styles
+(`.fist-pag*` classes) are defined locally in `public_html/styles.css`
+in a dark-theme variant — the upstream `fist-shared.css` isn't shipped.
 
 ## Recipe to port a component (kept for reference)
 

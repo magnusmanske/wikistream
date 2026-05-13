@@ -263,3 +263,45 @@ div.person-description {
 .table-striped tbody tr:nth-of-type(odd) td {
     color: white;
 }
+
+/* ── <pagination> (shared library; expects fist-shared.css which we don't
+   ship — local dark-theme styles instead) ────────────────────────── */
+.fist-pag {
+    display: flex;
+    justify-content: center;
+}
+.fist-pag-bar {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+}
+.fist-pag-btn {
+    min-width: 2rem;
+    padding: 0.25rem 0.5rem;
+    background: transparent;
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 0.25rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    line-height: 1;
+}
+.fist-pag-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.6);
+}
+.fist-pag-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.fist-pag-active {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: white;
+    font-weight: bold;
+}
+.fist-pag-info {
+    margin-left: 0.75rem;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.9rem;
+}

@@ -21,7 +21,7 @@ import PageHeader      from './components/page-header.js';
 import EntryThumb      from './components/entry-thumb.js';
 import PersonThumb     from './components/person-thumb.js';
 import SectionRow      from './components/section-row.js';
-import BatchNavigator  from './components/batch-navigator.js';
+import Pagination      from '../resources/vue_es6/pagination.js';
 import { createRouter } from './router.js';
 
 // 1. Initialise shared state.
@@ -43,12 +43,13 @@ setWidarApiUrl(
 //    commons-thumbnail, mastodon-button, …) via the barrel.
 registerAll(Vue);
 
-// 3. Register wikistream-local components.
+// 3. Register wikistream-local components and the shared <pagination>
+//    (which isn't included in registerAll's barrel).
 Vue.component('page-header',     PageHeader);
 Vue.component('entry-thumb',     EntryThumb);
 Vue.component('person-thumb',    PersonThumb);
 Vue.component('section-row',     SectionRow);
-Vue.component('batch-navigator', BatchNavigator);
+Vue.component('pagination',      Pagination);
 
 // 4. Mount.
 const router = createRouter();

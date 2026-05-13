@@ -2,8 +2,8 @@
  * <candidates-page> — items that don't yet have a video source. Helps
  * editors find candidates to add.
  *
- * `:offset` is the absolute item offset; we expose it as a 0-based batch
- * index to <batch-navigator>.
+ * `:offset` is the absolute item offset (0-based) passed straight to
+ * the shared <pagination> component.
  */
 
 import { ttMixin } from '../../resources/vue_es6/state.js';
@@ -21,12 +21,13 @@ export default {
         const candidates = ref([]);
         const total_candidates = ref(0);
 
-        const current_batch = computed(() => Math.floor((parseInt(props.offset, 10) || 0) / BATCH));
+        const offset_num = computed(() => parseInt(props.offset, 10) || 0);
 
         onMounted(async () => {
-            const o = parseInt(props.offset, 10) || 0;
             try {
-                const res = await fetch(`./api.php?action=get_candidate_items&offset=${o}`);
+                const res = await fetch(
+                    `./api.php?action=get_candidate_items&offset=${offset_num.value}`,
+                );
                 const j = await res.json();
                 candidates.value = j.data || [];
                 total_candidates.value = j.total_candidates || 0;
@@ -41,11 +42,12 @@ export default {
             return encodeURIComponent(query);
         }
 
-        return { loading, candidates, total_candidates, current_batch, getLabelYear, BATCH };
+        return { loading, candidates, total_candidates, offset_num, getLabelYear, BATCH };
     },
     methods: {
-        set_current(new_batch) {
-            this.$router.push('/candidates/' + (new_batch * BATCH));
+        // <pagination> emits the new item offset directly.
+        goto_offset(new_offset) {
+            this.$router.push('/candidates/' + new_offset);
         },
     },
     template: `
@@ -64,7 +66,7 @@ export default {
                         </div>
                         <div style="display: flex;">
                             <div style="flex-grow: 1;"></div>
-                            <batch-navigator :batch_size="BATCH" :total="total_candidates" :current="current_batch" @set-current="set_current($event)"></batch-navigator>
+                            <pagination :offset="offset_num" :items-per-page="BATCH" :total="total_candidates" @go-to-page="goto_offset($event)"></pagination>
                             <div style="flex-grow: 1;"></div>
                         </div>
                         <div style="display: flex;">
@@ -111,7 +113,7 @@ export default {
                         </div>
                         <div style="display: flex;">
                             <div style="flex-grow: 1;"></div>
-                            <batch-navigator :batch_size="BATCH" :total="total_candidates" :current="current_batch" @set-current="set_current($event)"></batch-navigator>
+                            <pagination :offset="offset_num" :items-per-page="BATCH" :total="total_candidates" @go-to-page="goto_offset($event)"></pagination>
                             <div style="flex-grow: 1;"></div>
                         </div>
                     </div>
