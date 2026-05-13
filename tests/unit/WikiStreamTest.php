@@ -1131,4 +1131,100 @@ final class WikiStreamTest extends TestCase
 
         $this->assertCount(0, $ws->capturedCommands);
     }
+
+    // ------------------------------------------------------------------
+    // B5: the P11484 "do not use for WikiFlix" qualifier (value
+    // Q124428688) must suppress file ingestion for ANY property in
+    // $config->file_props — not just P10 / P724. Regression test
+    // protects the universal opt-out behaviour at add_item_details.
+    // ------------------------------------------------------------------
+
+    /**
+     * Build a Wikidata claim object with a string mainsnak value and an
+     * optional P11484 opt-out qualifier.
+     */
+    private function makeFileClaim(string $key, bool $optOut = false): object
+    {
+        $c = new \stdClass();
+        $c->mainsnak = new \stdClass();
+        $c->mainsnak->datavalue = new \stdClass();
+        $c->mainsnak->datavalue->value = $key;
+        $c->mainsnak->datavalue->type = 'string';
+        if ($optOut) {
+            $c->qualifiers = new \stdClass();
+            $qual = new \stdClass();
+            $qual->datavalue = new \stdClass();
+            $qual->datavalue->value = (object) ['id' => 'Q124428688'];
+            $c->qualifiers->P11484 = [$qual];
+        }
+        return $c;
+    }
+
+    public function test_p11484_opt_out_applies_to_all_file_props(): void
+    {
+        [$ws] = $this->makeWikiStream();
+
+        // One claim per file property; mix opted-out and clean.
+        $claims = [
+            10    => [
+                $this->makeFileClaim('Clean-Commons.webm'),
+                $this->makeFileClaim('OptedOut-Commons.webm', optOut: true),
+            ],
+            724   => [$this->makeFileClaim('clean-ia-id')],
+            1651  => [$this->makeFileClaim('optedout-yt-id', optOut: true)],
+            4015  => [$this->makeFileClaim('clean-vimeo-id')],
+            11731 => [$this->makeFileClaim('optedout-dm-id', optOut: true)],
+        ];
+
+        $item = new class($claims) extends \WikidataItem {
+            private array $claimsByProp;
+            public function __construct(array $claimsByProp)
+            {
+                parent::__construct((object) ['id' => 'Q42']);
+                $this->claimsByProp = $claimsByProp;
+            }
+            public function getClaims(string|int $prop): array
+            {
+                $key = (int) preg_replace('/\D/', '', (string) $prop);
+                return $this->claimsByProp[$key] ?? [];
+            }
+            public function getLabel(string $lang = 'en'): string { return 'Test Film'; }
+            public function getSitelinks(): array { return []; }
+            public function getFirstString(string $prop): string { return ''; }
+            public function getTarget(object $claim): string { return ''; }
+        };
+
+        $wil = new \WikidataItemList();
+        $wil->setItem(42, $item);
+
+        $qs = [];
+        $sections = [];
+        $entry_files = [];
+        $items_for_labels = []; // array form so add_item_details defers labels
+        $item_rows = [];
+
+        // add_item_details is protected and takes references. Use a closure
+        // bound to the instance so PHP threads the by-reference args through
+        // without reflection's invokeArgs limitations.
+        $invoke = \Closure::bind(
+            function ($wil, $q, &$qs, &$sections, &$entry_files, &$items_for_labels, &$item_rows) {
+                $this->add_item_details($wil, $q, $qs, $sections, $entry_files, $items_for_labels, $item_rows);
+            },
+            $ws,
+            \WikiStream::class,
+        );
+        $invoke($wil, 42, $qs, $sections, $entry_files, $items_for_labels, $item_rows);
+
+        // Clean files for every property are kept; opted-out keys are dropped.
+        $joined = implode("\n", $entry_files);
+        $this->assertStringContainsString('Clean-Commons.webm', $joined, 'Clean P10 file must be kept.');
+        $this->assertStringContainsString('clean-ia-id', $joined, 'Clean P724 file must be kept.');
+        $this->assertStringContainsString('clean-vimeo-id', $joined, 'Clean P4015 file must be kept.');
+
+        $this->assertStringNotContainsString('OptedOut-Commons.webm', $joined, 'P10 opt-out must filter the file.');
+        $this->assertStringNotContainsString('optedout-yt-id', $joined, 'P1651 opt-out must filter the file.');
+        $this->assertStringNotContainsString('optedout-dm-id', $joined, 'P11731 opt-out must filter the file.');
+
+        $this->assertCount(3, $entry_files, 'Exactly 3 clean files (one per non-opted-out claim) must be ingested.');
+    }
 }
