@@ -972,6 +972,126 @@ final class WikiStreamTest extends TestCase
         $this->assertStringNotContainsString('ia-id-3', $joined, 'Unresolved IMDb tt0003 yields no command.');
     }
 
+    // ------------------------------------------------------------------
+    // C2: import_commons_pd_films_via_p180() walks a whitelist of
+    // Commons categories, restricts to video files, fetches each file's
+    // Wikidata M-entity P180 (depicts) claim, and queues a QS command
+    // to add P10 to film items that lack a P10 statement. Only files
+    // explicitly linked to a film via P180 are accepted — title
+    // matching is unsafe.
+    // ------------------------------------------------------------------
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_import_commons_pd_films_via_p180_links_p180_films(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        // SPARQL film-verification: Q700 is a film with no P10; Q701 is not a film.
+        $tfc->method('getSPARQL_TSV')->willReturn([
+            ['q' => 'http://www.wikidata.org/entity/Q700'],
+        ]);
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+
+        $http = $this->createMock(\HttpClientInterface::class);
+        $http->method('getJson')->willReturnCallback(function (string $url) {
+            // Category members
+            if (str_contains($url, 'list=categorymembers')) {
+                $r = new \stdClass();
+                $r->query = new \stdClass();
+                $r->query->categorymembers = [
+                    (object) ['title' => 'File:GoodVideo.webm'],
+                    (object) ['title' => 'File:NotAVideo.jpg'], // filtered by extension
+                    (object) ['title' => 'File:WrongTarget.webm'], // P180 points to Q701 (not a film)
+                ];
+                return $r;
+            }
+            // wbgetentities for a single file
+            if (str_contains($url, 'action=wbgetentities')) {
+                $r = new \stdClass();
+                $r->entities = new \stdClass();
+                if (str_contains($url, 'GoodVideo.webm')) {
+                    $r->entities->M1 = (object) [
+                        'claims' => (object) [
+                            'P180' => [
+                                (object) ['mainsnak' => (object) [
+                                    'datavalue' => (object) [
+                                        'value' => (object) ['id' => 'Q700'],
+                                    ],
+                                ]],
+                            ],
+                        ],
+                    ];
+                } elseif (str_contains($url, 'WrongTarget.webm')) {
+                    $r->entities->M2 = (object) [
+                        'claims' => (object) [
+                            'P180' => [
+                                (object) ['mainsnak' => (object) [
+                                    'datavalue' => (object) [
+                                        'value' => (object) ['id' => 'Q701'],
+                                    ],
+                                ]],
+                            ],
+                        ],
+                    ];
+                }
+                return $r;
+            }
+            return null;
+        });
+
+        $config = new \WikiStreamConfigWikiFlix();
+        $ws = new class($config, $tfc, $http) extends \WikiStream {
+            public array $capturedCommands = [];
+            protected function pushQuickStatements(array $commands): void
+            {
+                $this->capturedCommands = $commands;
+            }
+        };
+        $ws->import_commons_pd_films_via_p180();
+
+        $joined = implode("\n", $ws->capturedCommands);
+        $this->assertStringContainsString("Q700\tP10\t\"GoodVideo.webm\"", $joined, 'P180-linked video to a P10-less film must be queued.');
+        $this->assertStringNotContainsString('NotAVideo.jpg', $joined, 'Non-video files must be filtered by extension.');
+        $this->assertStringNotContainsString('Q701', $joined, 'P180 targets not verified as P10-less films must be skipped.');
+        $this->assertCount(1, $ws->capturedCommands);
+    }
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_import_commons_pd_films_via_p180_no_ia_results_skips_sparql(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $tfc->expects($this->never())->method('getSPARQL_TSV');
+
+        $http = $this->createMock(\HttpClientInterface::class);
+        $http->method('getJson')->willReturnCallback(function (string $_url) {
+            $r = new \stdClass();
+            $r->query = new \stdClass();
+            $r->query->categorymembers = [];
+            return $r;
+        });
+
+        $config = new \WikiStreamConfigWikiFlix();
+        $ws = new class($config, $tfc, $http) extends \WikiStream {
+            public array $capturedCommands = [];
+            protected function pushQuickStatements(array $commands): void
+            {
+                $this->capturedCommands = $commands;
+            }
+        };
+        $ws->import_commons_pd_films_via_p180();
+
+        $this->assertCount(0, $ws->capturedCommands);
+    }
+
     /**
      * @SuppressWarnings(PHPMD.ShortVariable)
      */

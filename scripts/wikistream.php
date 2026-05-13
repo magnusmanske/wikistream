@@ -49,6 +49,31 @@ class WikiStream
 	 */
 	public const IA_C3_COLLECTIONS = ['feature_films', 'silent_films', 'prelinger'];
 
+	/**
+	 * Maximum number of Commons files import_commons_pd_films_via_p180()
+	 * will examine per cron invocation, summed across all whitelisted
+	 * categories. Bounds the per-file SDC fetch fan-out and the SPARQL
+	 * VALUES size.
+	 */
+	public const C2_FILES_PER_RUN = 100;
+
+	/**
+	 * Commons categories whose video members carry P180 (depicts) links
+	 * to Wikidata film items. Conservative whitelist — categories where
+	 * the curation precision is high enough that P180 reliably points to
+	 * the depicted film and not, say, a related image.
+	 */
+	public const C2_COMMONS_CATEGORIES = [
+		'Films in the public domain',
+	];
+
+	/**
+	 * Commons file extensions we treat as video for C2. Files outside
+	 * this set are silently skipped — adding P10 to a film for a JPG
+	 * still would be wrong.
+	 */
+	public const C2_VIDEO_EXTENSIONS = ['webm', 'ogv', 'ogg', 'mp4'];
+
 	public $tfc;
 	public $language = "en";
 	public $config;
@@ -1617,6 +1642,135 @@ class WikiStream
 			$commands[] = "Q{$q_numeric}\tP724\t\"{$ia_safe}\"\t/* WikiFlix C3: from IA curated collection */";
 		}
 
+		$this->pushQuickStatements($commands);
+	}
+
+	/**
+	 * Walk a whitelist of Commons categories for video files, fetch each
+	 * file's M-entity P180 (depicts) claim, and queue a QuickStatements
+	 * command to add P10 to the depicted film — but only when the target
+	 * is a film and lacks any existing P10 statement.
+	 *
+	 * The P180 link is the only signal we trust: title-matching files to
+	 * film items is too noisy. Files without a single P180 are skipped.
+	 * Files with multiple P180 values are skipped too — we can't tell
+	 * which one the file is supposed to be a video of.
+	 *
+	 * Bounded by self::C2_FILES_PER_RUN files examined per invocation.
+	 */
+	public function import_commons_pd_films_via_p180(): void
+	{
+		// 1. Walk the whitelisted Commons categories for file members
+		//    that have a video extension.
+		$files = []; // canonical title (no "File:" prefix) — list, dedup later
+		foreach (self::C2_COMMONS_CATEGORIES as $category) {
+			if (count($files) >= self::C2_FILES_PER_RUN) {
+				break;
+			}
+			$limit = self::C2_FILES_PER_RUN - count($files);
+			$url =
+				"https://commons.wikimedia.org/w/api.php" .
+				"?action=query&list=categorymembers" .
+				"&cmtitle=" . rawurlencode("Category:{$category}") .
+				"&cmtype=file&cmlimit={$limit}&format=json";
+			$j = $this->httpClient->getJson($url);
+			$members = $j->query->categorymembers ?? null;
+			if (!is_array($members)) {
+				continue;
+			}
+			foreach ($members as $m) {
+				$title = (string) ($m->title ?? "");
+				if (strpos($title, "File:") !== 0) {
+					continue;
+				}
+				$name = substr($title, 5);
+				$ext = strtolower((string) pathinfo($name, PATHINFO_EXTENSION));
+				if (!in_array($ext, self::C2_VIDEO_EXTENSIONS, true)) {
+					continue;
+				}
+				$files[] = $name;
+				if (count($files) >= self::C2_FILES_PER_RUN) {
+					break;
+				}
+			}
+		}
+		$files = array_values(array_unique($files));
+		if (count($files) === 0) {
+			return;
+		}
+
+		// 2. For each video file, fetch the M-entity P180 claim. Take
+		//    only the single-target case to avoid ambiguity.
+		$fileToFilm = []; // commons filename -> wikidata Q-id string
+		foreach ($files as $name) {
+			$url =
+				"https://commons.wikimedia.org/w/api.php" .
+				"?action=wbgetentities&sites=commonswiki" .
+				"&titles=" . rawurlencode("File:{$name}") .
+				"&props=claims&format=json";
+			$j = $this->httpClient->getJson($url);
+			if (!isset($j->entities)) {
+				continue;
+			}
+			// The single returned entity (M<id>) is keyed by ID.
+			$entity = null;
+			foreach ((array) $j->entities as $_id => $e) {
+				$entity = $e;
+				break;
+			}
+			if (!isset($entity->claims->P180)) {
+				continue;
+			}
+			$p180 = $entity->claims->P180;
+			if (!is_array($p180) || count($p180) !== 1) {
+				continue; // require exactly one P180 to avoid ambiguity
+			}
+			$target = $p180[0]->mainsnak->datavalue->value->id ?? null;
+			if (!is_string($target) || !preg_match('~^Q\d+$~', $target)) {
+				continue;
+			}
+			$fileToFilm[$name] = $target;
+		}
+		if (count($fileToFilm) === 0) {
+			return;
+		}
+
+		// 3. Verify each candidate film is a film AND lacks a P10
+		//    statement entirely. The "no P10 yet" rule is conservative —
+		//    if the film already has even one P10 statement, leave it
+		//    alone rather than risk wrong/duplicate additions.
+		$valuesList = "wd:" . implode(" wd:", array_values($fileToFilm));
+		$sparql =
+			"SELECT ?q WHERE {
+				VALUES ?q { {$valuesList} }
+				?q wdt:P31/wdt:P279* wd:Q11424 .
+				FILTER NOT EXISTS { ?q wdt:P10 ?_x }
+			}";
+
+		$verifiedFilms = [];
+		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+			$q = $this->tfc->parseItemFromURL((string) ($row["q"] ?? ""));
+			if ($q !== "") {
+				$verifiedFilms[$q] = true;
+			}
+		}
+		if (count($verifiedFilms) === 0) {
+			return;
+		}
+
+		// 4. Emit QS commands.
+		$commands = [];
+		foreach ($fileToFilm as $name => $film_q) {
+			if (!isset($verifiedFilms[$film_q])) {
+				continue;
+			}
+			$q_numeric = (int) preg_replace("|\D|", "", $film_q);
+			if ($q_numeric <= 0) {
+				continue;
+			}
+			$name_safe = addslashes($name);
+			$commands[] = "Q{$q_numeric}\tP10\t\"{$name_safe}\"\t/* WikiFlix C2: via P180 in Commons category */";
+		}
 		$this->pushQuickStatements($commands);
 	}
 
