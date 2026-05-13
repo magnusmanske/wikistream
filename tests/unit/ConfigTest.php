@@ -60,6 +60,38 @@ final class ConfigTest extends TestCase
         }
     }
 
+    /**
+     * A1: Query #1 must walk the P279 subclass tree below Q19652 so that
+     * P6216 values like Q88088423 ("copyrighted, dedicated to the public
+     * domain by copyright holder") and any future PD-equivalent subclass
+     * are also matched. The hard-coded `wdt:P6216 wd:Q19652` only matched
+     * the exact item.
+     */
+    public function test_wikiflix_query1_uses_p6216_subclass_path(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $query1 = $config->sparql[0];
+
+        $this->assertMatchesRegularExpression(
+            '/wdt:P6216\s*\/\s*\(?\s*wdt:P279\*\s*\)?\s+wd:Q19652/',
+            $query1,
+            'Query #1 must traverse P279* below Q19652 (e.g. wdt:P6216/wdt:P279* wd:Q19652).'
+        );
+    }
+
+    /**
+     * A1: the change must not weaken existing filters — the film P31
+     * subclass walk and the glass-positive MINUS must still be present.
+     */
+    public function test_wikiflix_query1_keeps_film_filter_and_glass_minus(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $query1 = $config->sparql[0];
+
+        $this->assertStringContainsString('wd:Q11424', $query1, 'Film class Q11424 must remain in query #1.');
+        $this->assertStringContainsString('Q97570383', $query1, 'Glass-positive exclusion must remain in query #1.');
+    }
+
     public function test_wikiflix_bad_genres_are_integers(): void
     {
         $config = new \WikiStreamConfigWikiFlix();

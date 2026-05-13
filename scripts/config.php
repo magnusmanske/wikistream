@@ -42,7 +42,11 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig
 	public $bad_genres = [185529, 4373044, 3461143, 599558]; # P136
 	public $sparql = [
 		"SELECT DISTINCT ?q {
-			?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P6216 wd:Q19652 .
+			?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P6216/(wdt:P279*) wd:Q19652 .
+			# P279* below Q19652 also catches PD-equivalent subclasses
+			# like Q88088423 (copyrighted, dedicated to the public domain
+			# by copyright holder). The base case wdt:P6216 wd:Q19652 is
+			# still matched because P279* allows zero hops.
 			MINUS { ?q wdt:P31 wd:Q97570383 } # Glass positive
 			OPTIONAL { ?q wdt:P724 ?ia }
 			OPTIONAL { ?q wdt:P10 ?commons }
