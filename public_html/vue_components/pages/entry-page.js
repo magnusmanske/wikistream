@@ -30,6 +30,7 @@ export default {
 		const cast = ref([]);
 		const tags = ref([]);
 		const description = ref('');
+		const share_status = ref('');
 		// Map of Q-id → Commons filename (P18) for everyone listed in the
 		// associated_people section. Populated asynchronously after the entry
 		// item loads; missing entries simply render without a thumbnail.
@@ -180,7 +181,7 @@ export default {
 
 		return {
 			loading, item, entry, cast, tags, description, person_images,
-			associated_people_props, social, error,
+			associated_people_props, social, error, share_status,
 		};
 	},
 	methods: {
@@ -197,6 +198,30 @@ export default {
 			} catch (e) {
 				alert(String(e));
 			}
+		},
+		async share() {
+			const url = this.social('url');
+			const title = (this.item && this.item.getLabel()) || '';
+			// Prefer the native Web Share sheet (iOS/Android/Chrome desktop).
+			if (typeof navigator.share === 'function') {
+				try {
+					await navigator.share({ title, url });
+					return;
+				} catch (_) {
+					// User cancelled or share failed — fall through to clipboard.
+				}
+			}
+			// Fallback: copy the link to the clipboard.
+			if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+				try {
+					await navigator.clipboard.writeText(url);
+					this.share_status = 'copied';
+					setTimeout(() => { this.share_status = ''; }, 1500);
+					return;
+				} catch (_) { /* fall through */ }
+			}
+			// Last resort — show a prompt the user can copy from manually.
+			window.prompt('Share this link:', url);
 		},
 	},
 	template: `
@@ -291,7 +316,12 @@ export default {
                                     Description from Wikipedia, under <a class="external" target="_blank" rel="noopener" href="https://en.wikipedia.org/wiki/Wikipedia:Text_of_the_Creative_Commons_Attribution-ShareAlike_4.0_International_License">Creative Commons Attribution-ShareAlike 4.0 License</a>.
                                 </div>
                             </div>
-                            <div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                                <button type="button" class="btn btn-outline-light btn-sm" @click="share" aria-label="Share">
+                                    <i class="bi bi-share"></i>
+                                    <span tt="share">Share</span>
+                                </button>
+                                <span v-if="share_status==='copied'" tt="link_copied" style="color: #8aff8a;">Link copied</span>
                                 <mastodon-button :message="social('message')" :target="social('url')"></mastodon-button>
                             </div>
                         </div>
