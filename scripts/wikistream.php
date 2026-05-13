@@ -74,6 +74,28 @@ class WikiStream
 	 */
 	public const C2_VIDEO_EXTENSIONS = ['webm', 'ogv', 'ogg', 'mp4'];
 
+	/**
+	 * Maximum number of QuickStatements add-statement commands the
+	 * import_p953_urls() bot will emit per cron invocation. Bounds bot
+	 * activity on the first runs through a large candidate backlog.
+	 */
+	public const P953_COMMANDS_PER_RUN = 100;
+
+	/**
+	 * Maximum number of IA candidate films import_ia_curated_films() will
+	 * fetch metadata for per cron invocation. Each candidate is one HTTP
+	 * request to archive.org/metadata; this caps that fan-out.
+	 */
+	public const IA_CURATED_CANDIDATES_PER_RUN = 200;
+
+	/**
+	 * IA collection slugs that are considered curated enough to skip the
+	 * 60–150 % duration-agreement filter used by SPARQL query #3. Films
+	 * whose IA item is in any of these collections are accepted on the
+	 * strength of the collection's own curation.
+	 */
+	public const IA_CURATED_COLLECTIONS = ['feature_films', 'silent_films', 'prelinger'];
+
 	public $tfc;
 	public $language = "en";
 	public $config;
@@ -1564,6 +1586,287 @@ class WikiStream
 		require_once $qs_lib;
 		$qs = $this->tfc->getQS($this->config->toolkey, __DIR__ . "/../bot.ini");
 		$this->tfc->runCommandsQS($commands, $qs);
+	}
+
+	/**
+	 * Ingest films whose IA P724 item belongs to a curated whitelist
+	 * collection (see self::IA_CURATED_COLLECTIONS), bypassing the
+	 * 60–150 % duration-agreement filter used by SPARQL query #3.
+	 *
+	 * Query #3 keeps working unchanged — this method is additive: any
+	 * film already accepted by query #3 still is, and films newly added
+	 * here are the ones query #3 rejected for duration or year reasons.
+	 *
+	 * Network cost is bounded by self::IA_CURATED_CANDIDATES_PER_RUN.
+	 * The Wikidata items themselves are merely INSERTed into `item`
+	 * (with available=0) — the normal pipeline picks them up on the
+	 * next pass to fetch file/section claims.
+	 */
+	public function import_ia_curated_films(): void
+	{
+		$sparql =
+			"SELECT DISTINCT ?q ?ia WHERE {
+				?q (wdt:P31/(wdt:P279*)) wd:Q11424 ;
+				   wdt:P2047 ?duration .
+				?q p:P724 ?statement .
+				MINUS { ?statement pq:P11484 wd:Q124428688 } .
+				?statement ps:P724 ?ia .
+				?statement pq:P2047 ?ia_duration .
+				MINUS { ?q wdt:P31 wd:Q97570383 }
+			}";
+
+		// q (int) → ia identifier (string). Cap candidate count before
+		// HTTP fan-out to bound load on the IA metadata API.
+		$candidates = [];
+		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+			if (count($candidates) >= self::IA_CURATED_CANDIDATES_PER_RUN) {
+				break;
+			}
+			$q = $this->tfc->parseItemFromURL((string) ($row["q"] ?? ""));
+			$q_numeric = (int) preg_replace("|\D|", "", (string) $q);
+			$ia = (string) ($row["ia"] ?? "");
+			if ($q_numeric > 0 && $ia !== "") {
+				$candidates[$q_numeric] = $ia;
+			}
+		}
+		if (count($candidates) === 0) {
+			return;
+		}
+
+		// Drop candidates that are already in the items table; the cron
+		// pipeline will pick those up the normal way.
+		$existing = $this->get_items_in_db();
+		foreach ($candidates as $q_numeric => $_ia) {
+			if (isset($existing["Q{$q_numeric}"])) {
+				unset($candidates[$q_numeric]);
+			}
+		}
+		if (count($candidates) === 0) {
+			return;
+		}
+
+		// Batch IA metadata fetches in chunks of 50.
+		$accepted = [];
+		foreach (array_chunk($candidates, 50, true) as $chunk) {
+			$urls = [];
+			foreach ($chunk as $q_numeric => $ia) {
+				$urls[$q_numeric] = "https://archive.org/metadata/" . rawurlencode($ia);
+			}
+			$responses = $this->httpClient->getJsonBatch($urls);
+			foreach ($chunk as $q_numeric => $_ia) {
+				$j = $responses[$q_numeric] ?? null;
+				if (!isset($j)) {
+					continue;
+				}
+				if (isset($j->is_dark) && $j->is_dark) {
+					continue;
+				}
+				$collection = $j->metadata->collection ?? null;
+				if ($collection === null) {
+					continue;
+				}
+				// Normalise to array: IA returns a string when an item is
+				// in exactly one collection and a list otherwise.
+				if (is_string($collection)) {
+					$collection = [$collection];
+				}
+				if (!is_array($collection)) {
+					continue;
+				}
+				$matches = array_intersect(self::IA_CURATED_COLLECTIONS, $collection);
+				if (count($matches) > 0) {
+					$accepted[] = $q_numeric;
+				}
+			}
+		}
+
+		if (count($accepted) === 0) {
+			return;
+		}
+
+		// Insert in chunks. INSERT IGNORE handles races against the
+		// normal SPARQL pipeline writing the same q in parallel.
+		foreach (array_chunk($accepted, 500) as $chunk) {
+			$sql =
+				"INSERT IGNORE INTO `item` (`q`) VALUES (" .
+				implode("),(", $chunk) .
+				")";
+			$this->tfc->getSQL($this->db, $sql);
+		}
+	}
+
+	/**
+	 * Promote wdt:P953 ("full work available at URL") values into the
+	 * native host-specific properties (P10/P724/P1651/P4015/P11731) via
+	 * QuickStatements, so the regular ingestion pipeline picks them up
+	 * on the next cron run.
+	 *
+	 * Targets films that have at least one P953 statement but none of the
+	 * supported host properties. Statements carrying the
+	 * P11484=Q124428688 ("do not use for WikiFlix") opt-out qualifier or
+	 * a deprecated rank are skipped. Bot activity is capped at
+	 * self::P953_COMMANDS_PER_RUN commands per invocation.
+	 */
+	public function import_p953_urls(): void
+	{
+		$sparql =
+			"SELECT DISTINCT ?q WHERE {
+				?q (wdt:P31/(wdt:P279*)) wd:Q11424 ;
+				   wdt:P953 ?url .
+				MINUS { ?q wdt:P10 ?_c }
+				MINUS { ?q wdt:P724 ?_i }
+				MINUS { ?q wdt:P1651 ?_y }
+				MINUS { ?q wdt:P4015 ?_v }
+				MINUS { ?q wdt:P11731 ?_d }
+				MINUS { ?q wdt:P31 wd:Q97570383 }
+			}";
+
+		$candidate_qs = [];
+		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+			$q = $this->tfc->parseItemFromURL((string) ($row["q"] ?? ""));
+			$q_numeric = (int) preg_replace("|\D|", "", (string) $q);
+			if ($q_numeric > 0) {
+				$candidate_qs[] = $q_numeric;
+			}
+		}
+		if (count($candidate_qs) === 0) {
+			return;
+		}
+		$candidate_qs = array_values(array_unique($candidate_qs));
+
+		$wil = $this->loadWikidataItemList($candidate_qs);
+
+		$commands = [];
+		foreach ($candidate_qs as $q_numeric) {
+			if (count($commands) >= self::P953_COMMANDS_PER_RUN) {
+				break;
+			}
+			$item = $wil->getItem($q_numeric);
+			if (!isset($item)) {
+				continue;
+			}
+			foreach ($item->getClaims("P953") as $claim) {
+				if (count($commands) >= self::P953_COMMANDS_PER_RUN) {
+					break;
+				}
+				if (isset($claim->rank) && $claim->rank === "deprecated") {
+					continue;
+				}
+				if (!isset($claim->mainsnak->datavalue->value)) {
+					continue;
+				}
+				$value = $claim->mainsnak->datavalue->value;
+				if (!is_string($value)) {
+					continue;
+				}
+
+				// Honour the same opt-out qualifier the file ingester respects.
+				if (isset($claim->qualifiers->P11484)) {
+					$opted_out = false;
+					foreach ($claim->qualifiers->P11484 as $qual) {
+						if (($qual->datavalue->value->id ?? "") === self::WD_DO_NOT_USE) {
+							$opted_out = true;
+							break;
+						}
+					}
+					if ($opted_out) {
+						continue;
+					}
+				}
+
+				$parsed = self::parseP953Url($value);
+				if ($parsed === null) {
+					continue;
+				}
+				[$prop, $key] = $parsed;
+				$key_safe = addslashes($key);
+				$commands[] = "Q{$q_numeric}\tP{$prop}\t\"{$key_safe}\"\t/* Imported from P953 URL */";
+			}
+		}
+
+		$this->pushQuickStatements($commands);
+	}
+
+	/**
+	 * Parse a URL appearing in a wdt:P953 (full work available at URL) claim
+	 * and identify the WikiFlix file-host property + key it should yield.
+	 *
+	 * Returns [property_id, key] for known hosts, or null when the URL does
+	 * not map to one of the supported video hosts. Used by import_p953_urls()
+	 * to queue QuickStatements add-statement commands that promote the
+	 * generic P953 link into the native host-specific property
+	 * (P10/P724/P1651/P4015/P11731), which the rest of the pipeline already
+	 * understands.
+	 *
+	 * Pure function, no side effects — kept testable in isolation.
+	 *
+	 * @return array{int,string}|null
+	 */
+	public static function parseP953Url(string $url): ?array
+	{
+		$url = trim($url);
+		if ($url === "") {
+			return null;
+		}
+		$parts = parse_url($url);
+		if (!is_array($parts) || !isset($parts["host"])) {
+			return null;
+		}
+		$host = strtolower($parts["host"]);
+		$path = ltrim($parts["path"] ?? "", "/");
+
+		// Internet Archive → P724 (only /details/<id> form is a watch page)
+		if (preg_match('~^(?:www\.)?archive\.org$~', $host)) {
+			if (preg_match('~^details/([^/?#]+)~', $path, $m)) {
+				return [724, $m[1]];
+			}
+			return null;
+		}
+
+		// YouTube → P1651: youtube.com/watch?v=, /embed/, plus youtu.be/<id>
+		if (preg_match('~^(?:www\.|m\.|music\.)?youtube\.com$~', $host)) {
+			parse_str($parts["query"] ?? "", $q);
+			if (isset($q["v"]) && is_string($q["v"]) && preg_match('~^[A-Za-z0-9_-]{6,}$~', $q["v"])) {
+				return [1651, $q["v"]];
+			}
+			if (preg_match('~^embed/([A-Za-z0-9_-]{6,})~', $path, $m)) {
+				return [1651, $m[1]];
+			}
+			return null;
+		}
+		if ($host === "youtu.be" || $host === "www.youtu.be") {
+			if (preg_match('~^([A-Za-z0-9_-]{6,})~', $path, $m)) {
+				return [1651, $m[1]];
+			}
+			return null;
+		}
+
+		// Vimeo → P4015 (numeric video ID)
+		if (preg_match('~^(?:www\.|player\.)?vimeo\.com$~', $host)) {
+			if (preg_match('~^(?:video/)?(\d+)~', $path, $m)) {
+				return [4015, $m[1]];
+			}
+			return null;
+		}
+
+		// Dailymotion → P11731
+		if (preg_match('~^(?:www\.)?dailymotion\.com$~', $host)) {
+			if (preg_match('~^video/([^/?#]+)~', $path, $m)) {
+				return [11731, $m[1]];
+			}
+			return null;
+		}
+
+		// Wikimedia Commons file pages → P10. Accept the common localised
+		// File-namespace prefixes since they all resolve to the same file.
+		if ($host === "commons.wikimedia.org" || $host === "commons.m.wikimedia.org") {
+			if (preg_match('~^wiki/(?:File|Datei|Fichier|Archivo|Plik|Bild):(.+)$~', $path, $m)) {
+				return [10, urldecode($m[1])];
+			}
+			return null;
+		}
+
+		return null;
 	}
 
 	/**

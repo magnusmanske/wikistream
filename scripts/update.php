@@ -28,6 +28,8 @@ match ($cmd) {
 	'import_ia_curated_imdb_p724' => $ws->import_ia_curated_imdb_p724(),
 	'import_commons_pd_films_via_p180' => $ws->import_commons_pd_films_via_p180(),
 	'import_commons_video_minutes' => $ws->import_commons_video_minutes(),
+	'import_p953_urls'          => $ws->import_p953_urls(),
+	'import_ia_curated_films'   => $ws->import_ia_curated_films(),
 	'update_item_no_files'      => $ws->update_item_no_files_search_results(),
 	'reset'                     => null, // already handled above
 	default                     => (function() use ($ws) {
@@ -54,6 +56,8 @@ match ($cmd) {
 		$ws->annotate_pre_1900_public_domain();
 		$ws->import_ia_curated_imdb_p724();
 		$ws->import_commons_pd_films_via_p180();
+		$ws->import_p953_urls();
+		$ws->import_ia_curated_films();
 
 		# Might run out of memory so run this last
 		$ws->generate_all_data();
