@@ -11,6 +11,7 @@
 
 import { state, ttMixin } from '../../resources/vue_es6/state.js';
 import { useFavorites } from '../composables/useFavorites.js';
+import { useHoverPrefetch } from '../composables/useHoverPrefetch.js';
 
 const { computed } = Vue;
 
@@ -20,6 +21,7 @@ export default {
     props: ['entry'],
     setup(props) {
         const { isFavorite, toggleFavorite } = useFavorites();
+        const { start: prefetchStart, cancel: prefetchCancel } = useHoverPrefetch();
 
         const logged_in = computed(
             () => !!(state.widar && state.widar.userinfo && state.widar.userinfo.name),
@@ -30,7 +32,13 @@ export default {
             if (props.entry && props.entry.q) toggleFavorite(props.entry.q);
         }
 
-        return { logged_in, is_fav, onHeartClick };
+        function onHoverStart() {
+            const q = props.entry && props.entry.q;
+            if (!q) return;
+            prefetchStart(`./api.php?action=get_entry&q=${encodeURIComponent(q)}`);
+        }
+
+        return { logged_in, is_fav, onHeartClick, onHoverStart, prefetchCancel };
     },
     methods: {
         missing_icon() {
@@ -45,7 +53,7 @@ export default {
         },
     },
     template: `
-        <div class="entry-container">
+        <div class="entry-container" @mouseenter="onHoverStart" @mouseleave="prefetchCancel">
             <div class="thumbnail-container">
                 <router-link :to="'/entry/'+entry.q">
                     <commons-thumbnail v-if="entry.image!=null" loading="lazy" :filename="entry.image" videothumbnail="1" width="200" nolink="1"></commons-thumbnail>
