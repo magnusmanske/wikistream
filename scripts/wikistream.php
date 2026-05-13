@@ -1147,83 +1147,83 @@ class WikiStream
 			$q2ia[$q] = $ia;
 		}
 
-		$userAgent =
-			"Mozilla/5.0 (Windows NT 5.1; rv:31.0) Gecko/20100101 Firefox/31.0";
-
 		$qs_commands = [];
 
 		$wil = new WikidataItemList();
 		$wil->loadItems(array_keys($q2ia));
+
+		// Pre-filter to items where the matching IA claim actually exists, so
+		// the batch fetch only includes URLs we'd act on.
+		$toFetch = []; // q => url
 		foreach ($q2ia as $q => $ia) {
 			$item = $wil->getItem($q);
 			if (!isset($item)) {
 				continue;
 			}
-			// print "Item {$q}\n" ;
-
-			$claims = $item->getClaims("P724");
-			unset($claim);
-			foreach ($claims as $c) {
+			$hasMatchingClaim = false;
+			foreach ($item->getClaims("P724") as $c) {
 				if (!isset($c->mainsnak)) {
 					continue;
-				} # Paranoia
+				}
 				if ($c->mainsnak->datavalue->value == $ia) {
-					$claim = $c;
+					$hasMatchingClaim = true;
+					break;
 				}
 			}
-			if (!isset($claim)) {
-				// print "Can not find claim for {$ia} in {$q}\n";
+			if (!$hasMatchingClaim) {
 				continue;
 			}
-			// print "Statement {$claim->id}\n";
+			$toFetch[$q] = "https://archive.org/metadata/{$ia}";
+		}
 
-			$url = "https://archive.org/metadata/{$ia}";
-			// print "{$url}\n" ;
-
-			$j = $this->get_json_from_url($url);
-			if (isset($j->is_dark) and $j->is_dark) {
-				// print "{$ia} is removed\n";
-				$cmd = "-{$q}\tP724\t\"{$ia}\"\t/* File was removed from Internet Archive */";
-				// print "{$cmd}\n";
-				$qs_commands[] = $cmd;
-				continue;
-			}
-
-			unset($minutes);
-			if (isset($j->metadata) and isset($j->metadata->runtime)) {
-				$seconds = self::parse_seconds($j->metadata->runtime);
-				if ($seconds > 0) {
-					$minutes = round($seconds / 60);
+		// Batch-fetch in chunks of 100 to bound memory (responses can be
+		// MB-sized for movies with many files). Inside each chunk the HTTP
+		// client runs `concurrency` requests in parallel.
+		foreach (array_chunk($toFetch, 100, true) as $chunk) {
+			$responses = $this->httpClient->getJsonBatch($chunk);
+			foreach ($chunk as $q => $url) {
+				$ia = $q2ia[$q];
+				$j  = $responses[$q] ?? null;
+				if (!isset($j)) {
+					continue; // network/5xx after retries
 				}
-			}
-			if (!isset($minutes) and isset($j->files)) {
-				foreach ($j->files as $file) {
-					if (!isset($file->length)) {
-						continue;
-					}
-					$seconds = self::parse_seconds($file->length);
-					if ($seconds == 0) {
-						continue;
-					}
-					if (!isset($minutes)) {
-						$minutes = 0;
-					}
-					$minutes = max(round($seconds / 60), $minutes);
-				}
-			}
 
-			if (isset($minutes)) {
-				$cmd = "{$q}\tP724\t\"{$ia}\"\tP2047\t{$minutes}~1U7727\t/* Imported from Internet Archive */";
-				// print "{$cmd}\n";
-				$qs_commands[] = $cmd;
-			} else {
-				// print "No runtime in IA for {$q} / {$ia}\n";
+				if (isset($j->is_dark) && $j->is_dark) {
+					$qs_commands[] = "-{$q}\tP724\t\"{$ia}\"\t/* File was removed from Internet Archive */";
+					continue;
+				}
+
+				$minutes = null;
+				if (isset($j->metadata) && isset($j->metadata->runtime)) {
+					$seconds = self::parse_seconds($j->metadata->runtime);
+					if ($seconds > 0) {
+						$minutes = round($seconds / 60);
+					}
+				}
+				if ($minutes === null && isset($j->files)) {
+					foreach ($j->files as $file) {
+						if (!isset($file->length)) {
+							continue;
+						}
+						$seconds = self::parse_seconds($file->length);
+						if ($seconds == 0) {
+							continue;
+						}
+						if ($minutes === null) {
+							$minutes = 0;
+						}
+						$minutes = max(round($seconds / 60), $minutes);
+					}
+				}
+
+				if ($minutes !== null) {
+					$qs_commands[] = "{$q}\tP724\t\"{$ia}\"\tP2047\t{$minutes}~1U7727\t/* Imported from Internet Archive */";
+				}
 			}
 		}
 
 		if (count($qs_commands) > 0) {
 			require_once "/data/project/quickstatements/public_html/quickstatements.php";
-			// print join("\n",$qs_commands)."\n";
 			print "Running " . count($qs_commands) . " QS commands\n";
 			$qs = $this->tfc->getQS("wikiflix", __DIR__ . "/../bot.ini");
 			$this->tfc->runCommandsQS($qs_commands, $qs);
@@ -1356,22 +1356,31 @@ class WikiStream
 			sleep(2);
 		}
 
-		# Commons
+		# Commons — batched
 		$sql =
 			"SELECT * FROM `item_no_files` WHERE `commons_results` IS NULL LIMIT 100";
 		$result = $this->tfc->getSQL($this->db, $sql);
+		$urlByQ = [];
+		$rowByQ = [];
 		while ($o = $result->fetch_object()) {
 			$query = "filetype:video \"{$o->title}\"";
 			if (isset($o->year)) {
 				$query .= " {$o->year}";
 			}
-			$url =
-				"https://commons.wikimedia.org/w/api.php?action=query&list=search&srnamespace=6&format=json&srsearch=" .
+			$urlByQ[(int) $o->q] = "https://commons.wikimedia.org/w/api.php?action=query&list=search&srnamespace=6&format=json&srsearch=" .
 				urlencode($query);
-			$j = $this->get_json_from_url($url);
-			$hits = count($j->query->search);
-			$sql = "UPDATE `item_no_files` SET `commons_results`={$hits} WHERE `q`={$o->q}";
-			$this->tfc->getSQL($this->db, $sql);
+			$rowByQ[(int) $o->q] = $o;
+		}
+		if (!empty($urlByQ)) {
+			$responses = $this->httpClient->getJsonBatch($urlByQ);
+			foreach ($urlByQ as $q => $_url) {
+				$j = $responses[$q] ?? null;
+				$hits = (isset($j) && isset($j->query->search) && is_array($j->query->search))
+					? count($j->query->search)
+					: 0;
+				$sql = "UPDATE `item_no_files` SET `commons_results`={$hits} WHERE `q`={$q}";
+				$this->tfc->getSQL($this->db, $sql);
+			}
 		}
 	}
 

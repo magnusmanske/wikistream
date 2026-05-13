@@ -14,13 +14,16 @@ final class StubCurlHttpClient extends \CurlHttpClient
 {
 	/** @var list<array{0:string|false,1:int,2:int,3:string}> */
 	public array $responses;
+	/** @var array<string, list<array{0:string|false,1:int,2:int,3:string}>> Per-URL queue used in batch mode. */
+	public array $responsesByUrl = [];
 	public int $attempts = 0;
 	public int $sleeps = 0;
+	public int $batchCalls = 0;
 
-	public function __construct(array $responses, int $maxAttempts = 3)
+	public function __construct(array $responses, int $maxAttempts = 3, int $concurrency = 4)
 	{
 		// Zero-microsecond backoff so the test doesn't actually sleep.
-		parent::__construct("ua", 10, 30, $maxAttempts, [0, 0, 0, 0]);
+		parent::__construct("ua", 10, 30, $maxAttempts, [0, 0, 0, 0], $concurrency);
 		$this->responses = $responses;
 	}
 
@@ -30,6 +33,20 @@ final class StubCurlHttpClient extends \CurlHttpClient
 		// Pop next canned response, or repeat the last one.
 		$next = array_shift($this->responses);
 		return $next ?? [false, 0, CURLE_COULDNT_CONNECT ?? 7, "exhausted"];
+	}
+
+	protected function executeBatch(array $urls): array
+	{
+		$this->batchCalls++;
+		$out = [];
+		foreach ($urls as $k => $url) {
+			$this->attempts++;
+			$queue = $this->responsesByUrl[$url] ?? [];
+			$next = array_shift($queue);
+			$this->responsesByUrl[$url] = $queue;
+			$out[$k] = $next ?? [false, 0, CURLE_COULDNT_CONNECT ?? 7, "exhausted"];
+		}
+		return $out;
 	}
 
 	protected function sleepBetweenAttempts(int $completedAttempts): void
@@ -129,5 +146,97 @@ final class HttpClientTest extends TestCase
 		$result = $client->getJson("https://example.test/scalar");
 
 		$this->assertNull($result);
+	}
+
+	// ------------------------------------------------------------------
+	// getJsonBatch — concurrent fetching with retry
+	// ------------------------------------------------------------------
+
+	public function test_batch_returns_results_keyed_by_input_keys(): void
+	{
+		$client = new StubCurlHttpClient([]);
+		$client->responsesByUrl = [
+			"https://a/" => [[json_encode(["name" => "a"]), 200, 0, ""]],
+			"https://b/" => [[json_encode(["name" => "b"]), 200, 0, ""]],
+		];
+
+		$result = $client->getJsonBatch(["alpha" => "https://a/", "beta" => "https://b/"]);
+
+		$this->assertArrayHasKey("alpha", $result);
+		$this->assertArrayHasKey("beta", $result);
+		$this->assertSame("a", $result["alpha"]->name);
+		$this->assertSame("b", $result["beta"]->name);
+	}
+
+	public function test_batch_preserves_input_order(): void
+	{
+		$client = new StubCurlHttpClient([]);
+		$client->responsesByUrl = [
+			"https://a/" => [[json_encode(["i" => 1]), 200, 0, ""]],
+			"https://b/" => [[json_encode(["i" => 2]), 200, 0, ""]],
+			"https://c/" => [[json_encode(["i" => 3]), 200, 0, ""]],
+		];
+
+		$result = $client->getJsonBatch(["a" => "https://a/", "b" => "https://b/", "c" => "https://c/"]);
+
+		$this->assertSame(["a", "b", "c"], array_keys($result));
+	}
+
+	public function test_batch_4xx_does_not_retry(): void
+	{
+		$client = new StubCurlHttpClient([], maxAttempts: 3);
+		$client->responsesByUrl = [
+			"https://a/" => [["", 404, 0, ""]],
+			"https://b/" => [[json_encode(["ok" => true]), 200, 0, ""]],
+		];
+
+		$result = @$client->getJsonBatch(["a" => "https://a/", "b" => "https://b/"]);
+
+		$this->assertNull($result["a"]);
+		$this->assertIsObject($result["b"]);
+		// One round only (both resolved on first pass)
+		$this->assertSame(1, $client->batchCalls);
+	}
+
+	public function test_batch_retries_5xx_per_url(): void
+	{
+		$client = new StubCurlHttpClient([], maxAttempts: 3);
+		$client->responsesByUrl = [
+			"https://flaky/" => [
+				["", 502, 0, ""],
+				[json_encode(["ok" => true]), 200, 0, ""],
+			],
+			"https://stable/" => [[json_encode(["ok" => true]), 200, 0, ""]],
+		];
+
+		$result = $client->getJsonBatch(["x" => "https://flaky/", "y" => "https://stable/"]);
+
+		$this->assertIsObject($result["x"]);
+		$this->assertIsObject($result["y"]);
+		// Round 1: both dispatched. Round 2: only "x" dispatched.
+		$this->assertSame(2, $client->batchCalls);
+	}
+
+	public function test_batch_gives_up_on_persistent_5xx(): void
+	{
+		$client = new StubCurlHttpClient([], maxAttempts: 2);
+		$client->responsesByUrl = [
+			"https://bad/" => [
+				["", 503, 0, ""],
+				["", 503, 0, ""],
+			],
+		];
+
+		$result = @$client->getJsonBatch(["bad" => "https://bad/"]);
+
+		$this->assertNull($result["bad"]);
+		$this->assertSame(2, $client->batchCalls);
+	}
+
+	public function test_batch_empty_input_returns_empty(): void
+	{
+		$client = new StubCurlHttpClient([]);
+		$this->assertSame([], $client->getJsonBatch([]));
+		$this->assertSame(0, $client->batchCalls);
 	}
 }
