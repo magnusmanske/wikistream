@@ -908,4 +908,98 @@ final class WikiStreamTest extends TestCase
 
         $this->assertCount(0, $ws->capturedCommands);
     }
+
+    // ------------------------------------------------------------------
+    // C3: import_ia_curated_imdb_p724() walks the curated IA collections
+    // for items carrying an IMDb external-identifier, resolves the IMDb
+    // ID to a Wikidata Q-id via P345 (skipping items that already have
+    // P724), and queues a QuickStatements command to add the IA P724.
+    // ------------------------------------------------------------------
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_import_ia_curated_imdb_p724_emits_qs_for_resolved_imdb(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+
+        // SPARQL resolves IMDb -> Wikidata Q. tt0001 -> Q501, tt0002 -> Q502.
+        $tfc->method('getSPARQL_TSV')->willReturn([
+            ['q' => 'http://www.wikidata.org/entity/Q501', 'imdb' => 'tt0001'],
+            ['q' => 'http://www.wikidata.org/entity/Q502', 'imdb' => 'tt0002'],
+        ]);
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+
+        // HTTP: IA search returns 3 results in feature_films, 1 in silent_films, 0 in prelinger.
+        $http = $this->createMock(\HttpClientInterface::class);
+        $http->method('getJson')->willReturnCallback(function (string $url) {
+            $r = new \stdClass();
+            $r->response = new \stdClass();
+            if (str_contains($url, 'feature_films')) {
+                $r->response->docs = [
+                    (object) ['identifier' => 'ia-id-1', 'external-identifier' => 'urn:imdb:tt0001'],
+                    (object) ['identifier' => 'ia-id-2', 'external-identifier' => 'urn:imdb:tt0002'],
+                    (object) ['identifier' => 'ia-id-3', 'external-identifier' => 'urn:imdb:tt0003'], // unresolved
+                ];
+            } elseif (str_contains($url, 'silent_films')) {
+                $r->response->docs = [
+                    (object) ['identifier' => 'ia-id-1-dup', 'external-identifier' => 'urn:imdb:tt0001'], // dup IMDb
+                ];
+            } else {
+                $r->response->docs = [];
+            }
+            return $r;
+        });
+
+        $config = new \WikiStreamConfigWikiFlix();
+        $ws = new class($config, $tfc, $http) extends \WikiStream {
+            public array $capturedCommands = [];
+            protected function pushQuickStatements(array $commands): void
+            {
+                $this->capturedCommands = $commands;
+            }
+        };
+        $ws->import_ia_curated_imdb_p724();
+
+        $this->assertCount(2, $ws->capturedCommands, 'Two resolved IMDb IDs should yield two commands.');
+        $joined = implode("\n", $ws->capturedCommands);
+        $this->assertStringContainsString("Q501\tP724\t\"ia-id-1\"", $joined);
+        $this->assertStringContainsString("Q502\tP724\t\"ia-id-2\"", $joined);
+        $this->assertStringNotContainsString('ia-id-3', $joined, 'Unresolved IMDb tt0003 yields no command.');
+    }
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_import_ia_curated_imdb_p724_no_ia_results_skips_sparql(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $tfc->expects($this->never())->method('getSPARQL_TSV');
+
+        $http = $this->createMock(\HttpClientInterface::class);
+        $http->method('getJson')->willReturnCallback(function (string $_url) {
+            $r = new \stdClass();
+            $r->response = new \stdClass();
+            $r->response->docs = [];
+            return $r;
+        });
+
+        $config = new \WikiStreamConfigWikiFlix();
+        $ws = new class($config, $tfc, $http) extends \WikiStream {
+            public array $capturedCommands = [];
+            protected function pushQuickStatements(array $commands): void
+            {
+                $this->capturedCommands = $commands;
+            }
+        };
+        $ws->import_ia_curated_imdb_p724();
+
+        $this->assertCount(0, $ws->capturedCommands);
+    }
 }

@@ -34,6 +34,21 @@ class WikiStream
 	 */
 	public const PRE_1900_PD_PER_RUN = 100;
 
+	/**
+	 * Maximum number of IA search results import_ia_curated_imdb_p724()
+	 * will consider per cron invocation. Bounds the IMDb→Wikidata lookup
+	 * SPARQL VALUES set size and the QS edit fan-out.
+	 */
+	public const C3_IMDB_CANDIDATES_PER_RUN = 100;
+
+	/**
+	 * IA curated film collections we mine for IMDb-IDs to link via P724.
+	 * Same set as IA_CURATED_COLLECTIONS — duplicated here so the two
+	 * features can be tuned independently (C3 might grow this set while
+	 * import_ia_curated_films() keeps a tighter list).
+	 */
+	public const IA_C3_COLLECTIONS = ['feature_films', 'silent_films', 'prelinger'];
+
 	public $tfc;
 	public $language = "en";
 	public $config;
@@ -1524,6 +1539,85 @@ class WikiStream
 		require_once $qs_lib;
 		$qs = $this->tfc->getQS($this->config->toolkey, __DIR__ . "/../bot.ini");
 		$this->tfc->runCommandsQS($commands, $qs);
+	}
+
+	/**
+	 * Mine IA's curated film collections for items carrying an IMDb
+	 * external-identifier, resolve the IMDb ID to a Wikidata Q via P345,
+	 * and queue QuickStatements to add P724 for items that don't already
+	 * carry one.
+	 *
+	 * Bounded by self::C3_IMDB_CANDIDATES_PER_RUN. The Wikidata side of
+	 * the resolution explicitly excludes items that already have a P724
+	 * statement, so the method is idempotent across cron runs.
+	 */
+	public function import_ia_curated_imdb_p724(): void
+	{
+		// imdb_id -> ia_identifier
+		$candidates = [];
+		foreach (self::IA_C3_COLLECTIONS as $collection) {
+			if (count($candidates) >= self::C3_IMDB_CANDIDATES_PER_RUN) {
+				break;
+			}
+			$remaining = self::C3_IMDB_CANDIDATES_PER_RUN - count($candidates);
+			$query = "collection:{$collection} AND external-identifier:urn\\:imdb\\:*";
+			$url =
+				"https://archive.org/advancedsearch.php?" .
+				"q=" . rawurlencode($query) .
+				"&fl%5B%5D=identifier&fl%5B%5D=external-identifier" .
+				"&rows={$remaining}&output=json";
+			$j = $this->httpClient->getJson($url);
+			if (!isset($j->response->docs) || !is_array($j->response->docs)) {
+				continue;
+			}
+			foreach ($j->response->docs as $doc) {
+				if (count($candidates) >= self::C3_IMDB_CANDIDATES_PER_RUN) {
+					break;
+				}
+				$ext = $doc->{"external-identifier"} ?? null;
+				if (is_array($ext)) {
+					$ext = $ext[0] ?? null;
+				}
+				if (!is_string($ext)) {
+					continue;
+				}
+				if (!preg_match('~^urn:imdb:(tt\d+)$~', $ext, $m)) {
+					continue;
+				}
+				$imdb = $m[1];
+				$ia = (string) ($doc->identifier ?? "");
+				if ($ia === "" || isset($candidates[$imdb])) {
+					continue;
+				}
+				$candidates[$imdb] = $ia;
+			}
+		}
+		if (count($candidates) === 0) {
+			return;
+		}
+
+		// Resolve IMDb -> Wikidata items lacking P724.
+		$valuesList = '"' . implode('" "', array_keys($candidates)) . '"';
+		$sparql =
+			"SELECT ?q ?imdb WHERE {
+				VALUES ?imdb { {$valuesList} }
+				?q wdt:P345 ?imdb .
+				FILTER NOT EXISTS { ?q wdt:P724 ?_ia }
+			}";
+
+		$commands = [];
+		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+			$q = $this->tfc->parseItemFromURL((string) ($row["q"] ?? ""));
+			$q_numeric = (int) preg_replace("|\D|", "", (string) $q);
+			$imdb = (string) ($row["imdb"] ?? "");
+			if ($q_numeric <= 0 || !isset($candidates[$imdb])) {
+				continue;
+			}
+			$ia_safe = addslashes($candidates[$imdb]);
+			$commands[] = "Q{$q_numeric}\tP724\t\"{$ia_safe}\"\t/* WikiFlix C3: from IA curated collection */";
+		}
+
+		$this->pushQuickStatements($commands);
 	}
 
 	/**

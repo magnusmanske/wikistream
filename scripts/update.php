@@ -25,6 +25,7 @@ match ($cmd) {
 	'purge_items_without_files' => $ws->purge_items_without_files(),
 	'annotate_ia_movies'        => $ws->annotate_ia_movies(),
 	'annotate_pre_1900_public_domain' => $ws->annotate_pre_1900_public_domain(),
+	'import_ia_curated_imdb_p724' => $ws->import_ia_curated_imdb_p724(),
 	'import_commons_video_minutes' => $ws->import_commons_video_minutes(),
 	'update_item_no_files'      => $ws->update_item_no_files_search_results(),
 	'reset'                     => null, // already handled above
@@ -50,6 +51,7 @@ match ($cmd) {
 		# These edits will take too long to percolate into SPARQL to be useful now, so prepare for the next update
 		$ws->annotate_ia_movies();
 		$ws->annotate_pre_1900_public_domain();
+		$ws->import_ia_curated_imdb_p724();
 
 		# Might run out of memory so run this last
 		$ws->generate_all_data();
