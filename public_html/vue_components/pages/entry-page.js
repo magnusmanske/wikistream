@@ -9,6 +9,7 @@
 import { state, ttMixin } from '../../resources/vue_es6/state.js';
 import { useLog } from '../composables/useLog.js';
 import { useFetch } from '../composables/useFetch.js';
+import { recordView } from '../composables/useRecentlyViewed.js';
 import { useWikipediaDescription } from '../composables/useWikipediaDescription.js';
 
 const { ref, onMounted, computed } = Vue;
@@ -65,12 +66,24 @@ export default {
 				add_tags();
 				loading.value = false;
 
-				// 3. Wikipedia description (fire-and-forget).
+				// 3. Record this view for the main-page "recently viewed" row.
+				recordView({
+					q: parseInt(props.q, 10),
+					title: entry.value.title || item.value.getLabel(),
+					image: entry.value.image
+						|| (item.value.hasClaims('P18') ? item.value.getFirstStringForProperty('P18') : null),
+					year: entry.value.year,
+					minutes: entry.value.minutes,
+					is_silent: entry.value.is_silent,
+					files: entry.value.entry_files || [],
+				});
+
+				// 4. Wikipedia description (fire-and-forget).
 				loadWikipediaDescription(entryQ, 'en').then((d) => {
 					if (d) description.value = d;
 				});
 
-				// 4. Pre-load associated people's Wikidata items so we can
+				// 5. Pre-load associated people's Wikidata items so we can
 				//    show their portrait (P18) inline. Fire-and-forget.
 				loadAssociatedPeopleImages();
 			} else {
