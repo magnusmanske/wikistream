@@ -560,6 +560,73 @@ final class WikiStreamTest extends TestCase
         $this->assertSame([], $updates);
     }
 
+    // ------------------------------------------------------------------
+    // update_item_labels_batch — single DELETE + single INSERT per call
+    // ------------------------------------------------------------------
+
+    private function makeItemWithLabels(int $q, array $labels): \WikidataItem
+    {
+        $j = new \stdClass();
+        $j->id = "Q{$q}";
+        $j->labels = (object) [];
+        foreach ($labels as $lang => $value) {
+            $j->labels->{$lang} = (object) ['value' => $value];
+        }
+        $item = new \WikidataItem($j);
+        return $item;
+    }
+
+    public function test_update_item_labels_batch_empty_does_nothing(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->expects($this->never())->method('getSQL');
+
+        $method = new ReflectionMethod(\WikiStream::class, 'update_item_labels_batch');
+        $method->invoke($ws, []);
+    }
+
+    public function test_update_item_labels_batch_emits_one_delete_and_one_insert(): void
+    {
+        $item1 = $this->makeItemWithLabels(7, ['en' => 'Buster', 'fr' => 'Buster (fr)']);
+        $item2 = $this->makeItemWithLabels(8, ['en' => 'Mary']);
+
+        [$ws, $tfc] = $this->makeWikiStream();
+        $sqls = [];
+        $tfc->method('getSQL')->willReturnCallback(function ($db, string $sql) use (&$sqls) {
+            $sqls[] = $sql;
+            return $this->emptyResult();
+        });
+
+        $method = new ReflectionMethod(\WikiStream::class, 'update_item_labels_batch');
+        $method->invoke($ws, [$item1, $item2]);
+
+        $this->assertCount(2, $sqls, 'one DELETE and one INSERT');
+        $this->assertMatchesRegularExpression('/^DELETE FROM `label`.*\b7\b.*\b8\b/', $sqls[0]);
+        $this->assertStringContainsString('INSERT IGNORE INTO `label`', $sqls[1]);
+        $this->assertStringContainsString("(7,'en','Buster')", $sqls[1]);
+        $this->assertStringContainsString("(7,'fr','Buster (fr)')", $sqls[1]);
+        $this->assertStringContainsString("(8,'en','Mary')", $sqls[1]);
+    }
+
+    public function test_update_item_labels_batch_no_labels_still_deletes(): void
+    {
+        // Item with no labels — its prior label rows should still be cleared.
+        $item = $this->makeItemWithLabels(99, []);
+
+        [$ws, $tfc] = $this->makeWikiStream();
+        $sqls = [];
+        $tfc->method('getSQL')->willReturnCallback(function ($db, string $sql) use (&$sqls) {
+            $sqls[] = $sql;
+            return $this->emptyResult();
+        });
+
+        $method = new ReflectionMethod(\WikiStream::class, 'update_item_labels_batch');
+        $method->invoke($ws, [$item]);
+
+        $this->assertCount(1, $sqls);
+        $this->assertStringStartsWith('DELETE FROM `label`', $sqls[0]);
+    }
+
     public function test_import_commons_video_minutes_no_rows_skips_http(): void
     {
         $httpClient = $this->createMock(\HttpClientInterface::class);

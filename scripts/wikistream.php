@@ -354,7 +354,8 @@ class WikiStream
 		$item_q_numeric,
 		&$qs,
 		&$sections,
-		&$entry_files
+		&$entry_files,
+		&$items_for_labels = null
 	): void {
 		$item = $wil->getItem($item_q_numeric);
 		if (!isset($item)) {
@@ -472,7 +473,12 @@ class WikiStream
 		$sql = "UPDATE `item` set `title`='{$title_safe}',`year`={$year_safe},`minutes`={$minutes_safe},`image`={$image_safe},`sites`={$sites_safe},`ts`='{$ts_safe}' WHERE `q`={$item_q_numeric}";
 		$this->tfc->getSQL($this->db, $sql);
 
-		$this->update_item_labels($item);
+		// Defer label refresh — caller batches via update_item_labels_batch().
+		if (is_array($items_for_labels)) {
+			$items_for_labels[] = $item;
+		} else {
+			$this->update_item_labels($item);
+		}
 	}
 
 	protected function add_item_details_chunk($chunk): void
@@ -482,6 +488,7 @@ class WikiStream
 		$qs = [];
 		$sections = [];
 		$entry_files = [];
+		$items_for_labels = [];
 		foreach ($chunk as $q_numeric) {
 			try {
 				$this->add_item_details(
@@ -490,6 +497,7 @@ class WikiStream
 					$qs,
 					$sections,
 					$entry_files,
+					$items_for_labels,
 				);
 			} catch (Exception $e) {
 				// print "Filtered out {$q_numeric} for bad genre\n";
@@ -525,6 +533,9 @@ class WikiStream
 		# Make item available
 		$sql = "UPDATE `item` SET `available`=1 WHERE `q` IN ($qs)";
 		$this->tfc->getSQL($this->db, $sql);
+
+		# Batched label refresh for the entire chunk
+		$this->update_item_labels_batch($items_for_labels);
 	}
 
 	public function add_missing_item_details(): void
@@ -687,20 +698,56 @@ class WikiStream
 
 	protected function update_item_labels($item): void
 	{
-		$q = $item->getQ();
-		$q_numeric = preg_replace("|\D|", "", $q);
-		$sql = "DELETE FROM `label` WHERE `q`={$q_numeric}";
-		$this->tfc->getSQL($this->db, $sql);
-		$sql = [];
-		foreach ($item->j->labels as $lang => $v) {
-			$lang_safe = $this->db->real_escape_string($lang);
-			$value_safe = $this->db->real_escape_string($v->value);
-			$sql[] = "({$q_numeric},'{$lang_safe}','{$value_safe}')";
+		$this->update_item_labels_batch([$item]);
+	}
+
+	/**
+	 * Batched label refresh for many items: one DELETE for the entire q-set
+	 * followed by one multi-row INSERT. With chunks of 50 items × ~30
+	 * languages each this collapses 50+50 round-trips into 2.
+	 *
+	 * Items with no labels are still included in the DELETE (so any stale
+	 * rows for those q's are cleared, matching the per-item behaviour).
+	 *
+	 * @param array $items list of WikidataItem
+	 */
+	protected function update_item_labels_batch(array $items): void
+	{
+		if (empty($items)) {
+			return;
 		}
-		if (count($sql) > 0) {
-			$sql =
-				"INSERT IGNORE INTO `label` (`q`,`language`,`value`) VALUES " .
-				implode(",", $sql);
+
+		$qNumerics = [];
+		$valueRows = [];
+		foreach ($items as $item) {
+			$q = $item->getQ();
+			$q_numeric = (int) preg_replace("|\D|", "", $q);
+			if ($q_numeric === 0) {
+				continue;
+			}
+			$qNumerics[] = $q_numeric;
+			foreach ($item->j->labels as $lang => $v) {
+				$lang_safe = $this->db->real_escape_string($lang);
+				$value_safe = $this->db->real_escape_string($v->value);
+				$valueRows[] = "({$q_numeric},'{$lang_safe}','{$value_safe}')";
+			}
+		}
+
+		if (empty($qNumerics)) {
+			return;
+		}
+
+		$qList = implode(",", array_values(array_unique($qNumerics)));
+		$this->tfc->getSQL($this->db, "DELETE FROM `label` WHERE `q` IN ({$qList})");
+
+		if (empty($valueRows)) {
+			return;
+		}
+
+		// Cap each INSERT at ~1000 rows to stay well under max_allowed_packet
+		// for pathological large label sets. Typical chunks fit in one INSERT.
+		foreach (array_chunk($valueRows, 1000) as $valueChunk) {
+			$sql = "INSERT IGNORE INTO `label` (`q`,`language`,`value`) VALUES " . implode(",", $valueChunk);
 			$this->tfc->getSQL($this->db, $sql);
 		}
 	}
@@ -721,13 +768,15 @@ class WikiStream
 		foreach (array_chunk($qs, 50) as $chunk) {
 			$wil = new WikidataItemList();
 			$wil->loadItems($chunk);
+			$itemsBatch = [];
 			foreach ($chunk as $q) {
 				$item = $wil->getItem($q);
 				if (!isset($item)) {
 					continue;
 				}
-				$this->update_item_labels($item);
+				$itemsBatch[] = $item;
 			}
+			$this->update_item_labels_batch($itemsBatch);
 		}
 	}
 
@@ -994,7 +1043,8 @@ class WikiStream
 		foreach (array_chunk($qs, 50) as $chunk) {
 			$wil = new WikidataItemList();
 			$wil->loadItems($chunk);
-			$sql = [];
+			$personRows = [];
+			$itemsBatch = [];
 			foreach ($chunk as $q) {
 				$item = $wil->getItem($q);
 				if (!isset($item)) {
@@ -1016,13 +1066,16 @@ class WikiStream
 				} else {
 					$image_safe = "null";
 				}
-				$sql[] = "({$q},'{$label_safe}','{$gender_safe}',{$image_safe},$sites_safe)";
-				$this->update_item_labels($item);
+				$personRows[] = "({$q},'{$label_safe}','{$gender_safe}',{$image_safe},$sites_safe)";
+				$itemsBatch[] = $item;
 			}
-			$sql =
-				"INSERT IGNORE INTO `person` (`q`,`label`,`gender`,`image`,`sites`) VALUES " .
-				implode(",", $sql);
-			$this->tfc->getSQL($this->db, $sql);
+			if (!empty($personRows)) {
+				$sql =
+					"INSERT IGNORE INTO `person` (`q`,`label`,`gender`,`image`,`sites`) VALUES " .
+					implode(",", $personRows);
+				$this->tfc->getSQL($this->db, $sql);
+			}
+			$this->update_item_labels_batch($itemsBatch);
 		}
 	}
 
