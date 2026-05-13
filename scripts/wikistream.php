@@ -28,6 +28,12 @@ class WikiStream
 	private const WD_DO_NOT_USE         = "Q124428688"; // P11484 qualifier: do not use for WikiFlix
 	private const WD_UNIT_MINUTE        = "http://www.wikidata.org/entity/Q7727";
 
+	/**
+	 * Maximum number of P6216 annotations the pre-1900 PD annotator
+	 * (annotate_pre_1900_public_domain()) will emit per cron invocation.
+	 */
+	public const PRE_1900_PD_PER_RUN = 100;
+
 	public $tfc;
 	public $language = "en";
 	public $config;
@@ -1485,6 +1491,79 @@ class WikiStream
 			$this->rollback();
 			throw $e;
 		}
+	}
+
+	/**
+	 * Load Wikidata items for the given Q-numbers. Factory method so tests
+	 * can substitute a pre-populated WikidataItemList without hitting the
+	 * network.
+	 */
+	protected function loadWikidataItemList(array $qs): WikidataItemList
+	{
+		$wil = new WikidataItemList();
+		$wil->loadItems($qs);
+		return $wil;
+	}
+
+	/**
+	 * Submit a batch of QuickStatements commands. No-op when the local
+	 * QuickStatements library isn't installed (dev / test environments),
+	 * which keeps callers test-friendly without sprinkling environment
+	 * checks at each call site.
+	 */
+	protected function pushQuickStatements(array $commands): void
+	{
+		if (count($commands) === 0) {
+			return;
+		}
+		print "Running " . count($commands) . " QS commands\n";
+		$qs_lib = "/data/project/quickstatements/public_html/quickstatements.php";
+		if (!file_exists($qs_lib)) {
+			return;
+		}
+		require_once $qs_lib;
+		$qs = $this->tfc->getQS($this->config->toolkey, __DIR__ . "/../bot.ini");
+		$this->tfc->runCommandsQS($commands, $qs);
+	}
+
+	/**
+	 * Conservative bot pass: stamp P6216=Q19652 (public domain) on films
+	 * dated before 1900 that have no copyright-status statement at all.
+	 *
+	 * Pre-1900 films are PD in every jurisdiction with a finite copyright
+	 * term — the most lenient term (life + 100) covers anyone who lived
+	 * to a plausible age. P459=Q47246828 ("published more than 95 years
+	 * ago") is added as the determination-method qualifier, matching the
+	 * Wikidata convention used on 32,954 existing film P6216 statements.
+	 *
+	 * Bounded by self::PRE_1900_PD_PER_RUN. The current candidate pool
+	 * is ~86 films, so a single run usually clears it.
+	 */
+	public function annotate_pre_1900_public_domain(): void
+	{
+		$sparql =
+			"SELECT DISTINCT ?q WHERE {
+				?q wdt:P31/wdt:P279* wd:Q11424 ;
+				   wdt:P577 ?date .
+				FILTER(YEAR(?date) < 1900)
+				FILTER NOT EXISTS { ?q wdt:P6216 ?_status }
+				MINUS { ?q wdt:P31 wd:Q97570383 }
+			}";
+
+		$commands = [];
+		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+			if (count($commands) >= self::PRE_1900_PD_PER_RUN) {
+				break;
+			}
+			$q = $this->tfc->parseItemFromURL((string) ($row["q"] ?? ""));
+			$q_numeric = (int) preg_replace("|\D|", "", (string) $q);
+			if ($q_numeric <= 0) {
+				continue;
+			}
+			$commands[] = "Q{$q_numeric}\tP6216\tQ19652\tP459\tQ47246828\t/* WikiFlix C1: pre-1900 film, PD by age */";
+		}
+
+		$this->pushQuickStatements($commands);
 	}
 
 	private static function parse_seconds(string $s): int

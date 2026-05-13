@@ -826,4 +826,86 @@ final class WikiStreamTest extends TestCase
 
         $ws->import_commons_video_minutes();
     }
+
+    // ------------------------------------------------------------------
+    // C1: annotate_pre_1900_public_domain() emits QuickStatements
+    // commands setting P6216=Q19652 (public domain) with the
+    // determination-method qualifier P459=Q47246828 ("published more
+    // than 95 years ago") for films dated before 1900 that have no
+    // existing P6216 statement. Hard-bounded by a per-run cap.
+    // ------------------------------------------------------------------
+
+    /**
+     * Build a recording WikiStream that captures pushQuickStatements()
+     * arguments instead of pushing them.
+     *
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    private function makeQsCapturingWikiStream(\ToolforgeCommon $tfc): object
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        return new class($config, $tfc, null) extends \WikiStream {
+            public array $capturedCommands = [];
+            protected function pushQuickStatements(array $commands): void
+            {
+                $this->capturedCommands = $commands;
+            }
+        };
+    }
+
+    public function test_annotate_pre_1900_public_domain_emits_correct_qs_shape(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $tfc->method('getSPARQL_TSV')->willReturn([
+            ['q' => 'http://www.wikidata.org/entity/Q1001'],
+            ['q' => 'http://www.wikidata.org/entity/Q1002'],
+        ]);
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+
+        $ws = $this->makeQsCapturingWikiStream($tfc);
+        $ws->annotate_pre_1900_public_domain();
+
+        $this->assertCount(2, $ws->capturedCommands);
+        $joined = implode("\n", $ws->capturedCommands);
+        // Each line is: "Q<id>\tP6216\tQ19652\tP459\tQ47246828\t/* comment */"
+        $this->assertStringContainsString("Q1001\tP6216\tQ19652\tP459\tQ47246828", $joined);
+        $this->assertStringContainsString("Q1002\tP6216\tQ19652\tP459\tQ47246828", $joined);
+    }
+
+    public function test_annotate_pre_1900_public_domain_caps_per_run(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $rows = [];
+        for ($q = 1; $q <= 200; $q++) {
+            $rows[] = ['q' => "http://www.wikidata.org/entity/Q{$q}"];
+        }
+        $tfc->method('getSPARQL_TSV')->willReturn($rows);
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+
+        $ws = $this->makeQsCapturingWikiStream($tfc);
+        $ws->annotate_pre_1900_public_domain();
+
+        $this->assertSame(\WikiStream::PRE_1900_PD_PER_RUN, count($ws->capturedCommands));
+    }
+
+    public function test_annotate_pre_1900_public_domain_no_candidates_skips_qs(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $tfc->method('getSPARQL_TSV')->willReturn([]);
+
+        $ws = $this->makeQsCapturingWikiStream($tfc);
+        $ws->annotate_pre_1900_public_domain();
+
+        $this->assertCount(0, $ws->capturedCommands);
+    }
 }
