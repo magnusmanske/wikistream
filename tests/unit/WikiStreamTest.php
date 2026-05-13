@@ -826,4 +826,309 @@ final class WikiStreamTest extends TestCase
 
         $ws->import_commons_video_minutes();
     }
+
+    // ------------------------------------------------------------------
+    // C1: annotate_pre_1900_public_domain() emits QuickStatements
+    // commands setting P6216=Q19652 (public domain) with the
+    // determination-method qualifier P459=Q47246828 ("published more
+    // than 95 years ago") for films dated before 1900 that have no
+    // existing P6216 statement. Hard-bounded by a per-run cap.
+    // ------------------------------------------------------------------
+
+    /**
+     * Build a recording WikiStream that captures pushQuickStatements()
+     * arguments instead of pushing them.
+     *
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    private function makeQsCapturingWikiStream(\ToolforgeCommon $tfc): object
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        return new class($config, $tfc, null) extends \WikiStream {
+            public array $capturedCommands = [];
+            protected function pushQuickStatements(array $commands): void
+            {
+                $this->capturedCommands = $commands;
+            }
+        };
+    }
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_annotate_pre_1900_public_domain_emits_correct_qs_shape(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $tfc->method('getSPARQL_TSV')->willReturn([
+            ['q' => 'http://www.wikidata.org/entity/Q1001'],
+            ['q' => 'http://www.wikidata.org/entity/Q1002'],
+        ]);
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+
+        $ws = $this->makeQsCapturingWikiStream($tfc);
+        $ws->annotate_pre_1900_public_domain();
+
+        $this->assertCount(2, $ws->capturedCommands);
+        $joined = implode("\n", $ws->capturedCommands);
+        // Each line is: "Q<id>\tP6216\tQ19652\tP459\tQ47246828\t/* comment */"
+        $this->assertStringContainsString("Q1001\tP6216\tQ19652\tP459\tQ47246828", $joined);
+        $this->assertStringContainsString("Q1002\tP6216\tQ19652\tP459\tQ47246828", $joined);
+    }
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_annotate_pre_1900_public_domain_caps_per_run(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $rows = [];
+        for ($q = 1; $q <= 200; $q++) {
+            $rows[] = ['q' => "http://www.wikidata.org/entity/Q{$q}"];
+        }
+        $tfc->method('getSPARQL_TSV')->willReturn($rows);
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+
+        $ws = $this->makeQsCapturingWikiStream($tfc);
+        $ws->annotate_pre_1900_public_domain();
+
+        $this->assertSame(\WikiStream::PRE_1900_PD_PER_RUN, count($ws->capturedCommands));
+    }
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_annotate_pre_1900_public_domain_no_candidates_skips_qs(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $tfc->method('getSPARQL_TSV')->willReturn([]);
+
+        $ws = $this->makeQsCapturingWikiStream($tfc);
+        $ws->annotate_pre_1900_public_domain();
+
+        $this->assertCount(0, $ws->capturedCommands);
+    }
+
+    // ------------------------------------------------------------------
+    // C3: import_ia_curated_imdb_p724() walks the curated IA collections
+    // for items carrying an IMDb external-identifier, resolves the IMDb
+    // ID to a Wikidata Q-id via P345 (skipping items that already have
+    // P724), and queues a QuickStatements command to add the IA P724.
+    // ------------------------------------------------------------------
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_import_ia_curated_imdb_p724_emits_qs_for_resolved_imdb(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+
+        // SPARQL resolves IMDb -> Wikidata Q. tt0001 -> Q501, tt0002 -> Q502.
+        $tfc->method('getSPARQL_TSV')->willReturn([
+            ['q' => 'http://www.wikidata.org/entity/Q501', 'imdb' => 'tt0001'],
+            ['q' => 'http://www.wikidata.org/entity/Q502', 'imdb' => 'tt0002'],
+        ]);
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+
+        // HTTP: IA search returns 3 results in feature_films, 1 in silent_films, 0 in prelinger.
+        $http = $this->createMock(\HttpClientInterface::class);
+        $http->method('getJson')->willReturnCallback(function (string $url) {
+            $r = new \stdClass();
+            $r->response = new \stdClass();
+            $r->response->docs = [];
+            if (str_contains($url, 'feature_films')) {
+                $r->response->docs = [
+                    (object) ['identifier' => 'ia-id-1', 'external-identifier' => 'urn:imdb:tt0001'],
+                    (object) ['identifier' => 'ia-id-2', 'external-identifier' => 'urn:imdb:tt0002'],
+                    (object) ['identifier' => 'ia-id-3', 'external-identifier' => 'urn:imdb:tt0003'], // unresolved
+                ];
+            }
+            if (str_contains($url, 'silent_films')) {
+                $r->response->docs = [
+                    (object) ['identifier' => 'ia-id-1-dup', 'external-identifier' => 'urn:imdb:tt0001'], // dup IMDb
+                ];
+            }
+            return $r;
+        });
+
+        $config = new \WikiStreamConfigWikiFlix();
+        $ws = new class($config, $tfc, $http) extends \WikiStream {
+            public array $capturedCommands = [];
+            protected function pushQuickStatements(array $commands): void
+            {
+                $this->capturedCommands = $commands;
+            }
+        };
+        $ws->import_ia_curated_imdb_p724();
+
+        $this->assertCount(2, $ws->capturedCommands, 'Two resolved IMDb IDs should yield two commands.');
+        $joined = implode("\n", $ws->capturedCommands);
+        $this->assertStringContainsString("Q501\tP724\t\"ia-id-1\"", $joined);
+        $this->assertStringContainsString("Q502\tP724\t\"ia-id-2\"", $joined);
+        $this->assertStringNotContainsString('ia-id-3', $joined, 'Unresolved IMDb tt0003 yields no command.');
+    }
+
+    // ------------------------------------------------------------------
+    // C2: import_commons_pd_films_via_p180() walks a whitelist of
+    // Commons categories, restricts to video files, fetches each file's
+    // Wikidata M-entity P180 (depicts) claim, and queues a QS command
+    // to add P10 to film items that lack a P10 statement. Only files
+    // explicitly linked to a film via P180 are accepted — title
+    // matching is unsafe.
+    // ------------------------------------------------------------------
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_import_commons_pd_films_via_p180_links_p180_films(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        // SPARQL film-verification: Q700 is a film with no P10; Q701 is not a film.
+        $tfc->method('getSPARQL_TSV')->willReturn([
+            ['q' => 'http://www.wikidata.org/entity/Q700'],
+        ]);
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+
+        $http = $this->createMock(\HttpClientInterface::class);
+        $http->method('getJson')->willReturnCallback(function (string $url) {
+            // Category members
+            if (str_contains($url, 'list=categorymembers')) {
+                $r = new \stdClass();
+                $r->query = new \stdClass();
+                $r->query->categorymembers = [
+                    (object) ['title' => 'File:GoodVideo.webm'],
+                    (object) ['title' => 'File:NotAVideo.jpg'], // filtered by extension
+                    (object) ['title' => 'File:WrongTarget.webm'], // P180 points to Q701 (not a film)
+                ];
+                return $r;
+            }
+            // wbgetentities for a single file
+            if (str_contains($url, 'action=wbgetentities')) {
+                $r = new \stdClass();
+                $r->entities = new \stdClass();
+                if (str_contains($url, 'GoodVideo.webm')) {
+                    $r->entities->M1 = (object) [
+                        'claims' => (object) [
+                            'P180' => [
+                                (object) ['mainsnak' => (object) [
+                                    'datavalue' => (object) [
+                                        'value' => (object) ['id' => 'Q700'],
+                                    ],
+                                ]],
+                            ],
+                        ],
+                    ];
+                } elseif (str_contains($url, 'WrongTarget.webm')) {
+                    $r->entities->M2 = (object) [
+                        'claims' => (object) [
+                            'P180' => [
+                                (object) ['mainsnak' => (object) [
+                                    'datavalue' => (object) [
+                                        'value' => (object) ['id' => 'Q701'],
+                                    ],
+                                ]],
+                            ],
+                        ],
+                    ];
+                }
+                return $r;
+            }
+            return null;
+        });
+
+        $config = new \WikiStreamConfigWikiFlix();
+        $ws = new class($config, $tfc, $http) extends \WikiStream {
+            public array $capturedCommands = [];
+            protected function pushQuickStatements(array $commands): void
+            {
+                $this->capturedCommands = $commands;
+            }
+        };
+        $ws->import_commons_pd_films_via_p180();
+
+        $joined = implode("\n", $ws->capturedCommands);
+        $this->assertStringContainsString("Q700\tP10\t\"GoodVideo.webm\"", $joined, 'P180-linked video to a P10-less film must be queued.');
+        $this->assertStringNotContainsString('NotAVideo.jpg', $joined, 'Non-video files must be filtered by extension.');
+        $this->assertStringNotContainsString('Q701', $joined, 'P180 targets not verified as P10-less films must be skipped.');
+        $this->assertCount(1, $ws->capturedCommands);
+    }
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_import_commons_pd_films_via_p180_no_ia_results_skips_sparql(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $tfc->expects($this->never())->method('getSPARQL_TSV');
+
+        $http = $this->createMock(\HttpClientInterface::class);
+        $http->method('getJson')->willReturnCallback(function () {
+            $r = new \stdClass();
+            $r->query = new \stdClass();
+            $r->query->categorymembers = [];
+            return $r;
+        });
+
+        $config = new \WikiStreamConfigWikiFlix();
+        $ws = new class($config, $tfc, $http) extends \WikiStream {
+            public array $capturedCommands = [];
+            protected function pushQuickStatements(array $commands): void
+            {
+                $this->capturedCommands = $commands;
+            }
+        };
+        $ws->import_commons_pd_films_via_p180();
+
+        $this->assertCount(0, $ws->capturedCommands);
+    }
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_import_ia_curated_imdb_p724_no_ia_results_skips_sparql(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $tfc->expects($this->never())->method('getSPARQL_TSV');
+
+        $http = $this->createMock(\HttpClientInterface::class);
+        $http->method('getJson')->willReturnCallback(function () {
+            $r = new \stdClass();
+            $r->response = new \stdClass();
+            $r->response->docs = [];
+            return $r;
+        });
+
+        $config = new \WikiStreamConfigWikiFlix();
+        $ws = new class($config, $tfc, $http) extends \WikiStream {
+            public array $capturedCommands = [];
+            protected function pushQuickStatements(array $commands): void
+            {
+                $this->capturedCommands = $commands;
+            }
+        };
+        $ws->import_ia_curated_imdb_p724();
+
+        $this->assertCount(0, $ws->capturedCommands);
+    }
 }

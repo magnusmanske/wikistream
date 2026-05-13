@@ -28,6 +28,52 @@ class WikiStream
 	private const WD_DO_NOT_USE         = "Q124428688"; // P11484 qualifier: do not use for WikiFlix
 	private const WD_UNIT_MINUTE        = "http://www.wikidata.org/entity/Q7727";
 
+	/**
+	 * Maximum number of P6216 annotations the pre-1900 PD annotator
+	 * (annotate_pre_1900_public_domain()) will emit per cron invocation.
+	 */
+	public const PRE_1900_PD_PER_RUN = 100;
+
+	/**
+	 * Maximum number of IA search results import_ia_curated_imdb_p724()
+	 * will consider per cron invocation. Bounds the IMDb→Wikidata lookup
+	 * SPARQL VALUES set size and the QS edit fan-out.
+	 */
+	public const C3_IMDB_CANDIDATES_PER_RUN = 100;
+
+	/**
+	 * IA curated film collections we mine for IMDb-IDs to link via P724.
+	 * Same set as IA_CURATED_COLLECTIONS — duplicated here so the two
+	 * features can be tuned independently (C3 might grow this set while
+	 * import_ia_curated_films() keeps a tighter list).
+	 */
+	public const IA_C3_COLLECTIONS = ['feature_films', 'silent_films', 'prelinger'];
+
+	/**
+	 * Maximum number of Commons files import_commons_pd_films_via_p180()
+	 * will examine per cron invocation, summed across all whitelisted
+	 * categories. Bounds the per-file SDC fetch fan-out and the SPARQL
+	 * VALUES size.
+	 */
+	public const C2_FILES_PER_RUN = 100;
+
+	/**
+	 * Commons categories whose video members carry P180 (depicts) links
+	 * to Wikidata film items. Conservative whitelist — categories where
+	 * the curation precision is high enough that P180 reliably points to
+	 * the depicted film and not, say, a related image.
+	 */
+	public const C2_COMMONS_CATEGORIES = [
+		'Films in the public domain',
+	];
+
+	/**
+	 * Commons file extensions we treat as video for C2. Files outside
+	 * this set are silently skipped — adding P10 to a film for a JPG
+	 * still would be wrong.
+	 */
+	public const C2_VIDEO_EXTENSIONS = ['webm', 'ogv', 'ogg', 'mp4'];
+
 	public $tfc;
 	public $language = "en";
 	public $config;
@@ -1485,6 +1531,287 @@ class WikiStream
 			$this->rollback();
 			throw $e;
 		}
+	}
+
+	/**
+	 * Load Wikidata items for the given Q-numbers. Factory method so tests
+	 * can substitute a pre-populated WikidataItemList without hitting the
+	 * network.
+	 */
+	protected function loadWikidataItemList(array $qs): WikidataItemList
+	{
+		$wil = new WikidataItemList();
+		$wil->loadItems($qs);
+		return $wil;
+	}
+
+	/**
+	 * Submit a batch of QuickStatements commands. No-op when the local
+	 * QuickStatements library isn't installed (dev / test environments),
+	 * which keeps callers test-friendly without sprinkling environment
+	 * checks at each call site.
+	 */
+	protected function pushQuickStatements(array $commands): void
+	{
+		if (count($commands) === 0) {
+			return;
+		}
+		print "Running " . count($commands) . " QS commands\n";
+		$qs_lib = "/data/project/quickstatements/public_html/quickstatements.php";
+		if (!file_exists($qs_lib)) {
+			return;
+		}
+		require_once $qs_lib;
+		$qs = $this->tfc->getQS($this->config->toolkey, __DIR__ . "/../bot.ini");
+		$this->tfc->runCommandsQS($commands, $qs);
+	}
+
+	/**
+	 * Mine IA's curated film collections for items carrying an IMDb
+	 * external-identifier, resolve the IMDb ID to a Wikidata Q via P345,
+	 * and queue QuickStatements to add P724 for items that don't already
+	 * carry one.
+	 *
+	 * Bounded by self::C3_IMDB_CANDIDATES_PER_RUN. The Wikidata side of
+	 * the resolution explicitly excludes items that already have a P724
+	 * statement, so the method is idempotent across cron runs.
+	 */
+	public function import_ia_curated_imdb_p724(): void
+	{
+		// imdb_id -> ia_identifier
+		$candidates = [];
+		foreach (self::IA_C3_COLLECTIONS as $collection) {
+			if (count($candidates) >= self::C3_IMDB_CANDIDATES_PER_RUN) {
+				break;
+			}
+			$remaining = self::C3_IMDB_CANDIDATES_PER_RUN - count($candidates);
+			$query = "collection:{$collection} AND external-identifier:urn\\:imdb\\:*";
+			$url =
+				"https://archive.org/advancedsearch.php?" .
+				"q=" . rawurlencode($query) .
+				"&fl%5B%5D=identifier&fl%5B%5D=external-identifier" .
+				"&rows={$remaining}&output=json";
+			$j = $this->httpClient->getJson($url);
+			if (!isset($j->response->docs) || !is_array($j->response->docs)) {
+				continue;
+			}
+			foreach ($j->response->docs as $doc) {
+				if (count($candidates) >= self::C3_IMDB_CANDIDATES_PER_RUN) {
+					break;
+				}
+				$ext = $doc->{"external-identifier"} ?? null;
+				if (is_array($ext)) {
+					$ext = $ext[0] ?? null;
+				}
+				if (!is_string($ext)) {
+					continue;
+				}
+				if (!preg_match('~^urn:imdb:(tt\d+)$~', $ext, $m)) {
+					continue;
+				}
+				$imdb = $m[1];
+				$ia = (string) ($doc->identifier ?? "");
+				if ($ia === "" || isset($candidates[$imdb])) {
+					continue;
+				}
+				$candidates[$imdb] = $ia;
+			}
+		}
+		if (count($candidates) === 0) {
+			return;
+		}
+
+		// Resolve IMDb -> Wikidata items lacking P724.
+		$valuesList = '"' . implode('" "', array_keys($candidates)) . '"';
+		$sparql =
+			"SELECT ?q ?imdb WHERE {
+				VALUES ?imdb { {$valuesList} }
+				?q wdt:P345 ?imdb .
+				FILTER NOT EXISTS { ?q wdt:P724 ?_ia }
+			}";
+
+		$commands = [];
+		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+			$q = $this->tfc->parseItemFromURL((string) ($row["q"] ?? ""));
+			$q_numeric = (int) preg_replace("|\D|", "", (string) $q);
+			$imdb = (string) ($row["imdb"] ?? "");
+			if ($q_numeric <= 0 || !isset($candidates[$imdb])) {
+				continue;
+			}
+			$ia_safe = addslashes($candidates[$imdb]);
+			$commands[] = "Q{$q_numeric}\tP724\t\"{$ia_safe}\"\t/* WikiFlix C3: from IA curated collection */";
+		}
+
+		$this->pushQuickStatements($commands);
+	}
+
+	/**
+	 * Walk a whitelist of Commons categories for video files, fetch each
+	 * file's M-entity P180 (depicts) claim, and queue a QuickStatements
+	 * command to add P10 to the depicted film — but only when the target
+	 * is a film and lacks any existing P10 statement.
+	 *
+	 * The P180 link is the only signal we trust: title-matching files to
+	 * film items is too noisy. Files without a single P180 are skipped.
+	 * Files with multiple P180 values are skipped too — we can't tell
+	 * which one the file is supposed to be a video of.
+	 *
+	 * Bounded by self::C2_FILES_PER_RUN files examined per invocation.
+	 */
+	public function import_commons_pd_films_via_p180(): void
+	{
+		// 1. Walk the whitelisted Commons categories for file members
+		//    that have a video extension.
+		$files = []; // canonical title (no "File:" prefix) — list, dedup later
+		foreach (self::C2_COMMONS_CATEGORIES as $category) {
+			if (count($files) >= self::C2_FILES_PER_RUN) {
+				break;
+			}
+			$limit = self::C2_FILES_PER_RUN - count($files);
+			$url =
+				"https://commons.wikimedia.org/w/api.php" .
+				"?action=query&list=categorymembers" .
+				"&cmtitle=" . rawurlencode("Category:{$category}") .
+				"&cmtype=file&cmlimit={$limit}&format=json";
+			$j = $this->httpClient->getJson($url);
+			$members = $j->query->categorymembers ?? null;
+			if (!is_array($members)) {
+				continue;
+			}
+			foreach ($members as $m) {
+				$title = (string) ($m->title ?? "");
+				if (strpos($title, "File:") !== 0) {
+					continue;
+				}
+				$name = substr($title, 5);
+				$ext = strtolower((string) pathinfo($name, PATHINFO_EXTENSION));
+				if (!in_array($ext, self::C2_VIDEO_EXTENSIONS, true)) {
+					continue;
+				}
+				$files[] = $name;
+				if (count($files) >= self::C2_FILES_PER_RUN) {
+					break;
+				}
+			}
+		}
+		$files = array_values(array_unique($files));
+		if (count($files) === 0) {
+			return;
+		}
+
+		// 2. For each video file, fetch the M-entity P180 claim. Take
+		//    only the single-target case to avoid ambiguity.
+		$fileToFilm = []; // commons filename -> wikidata Q-id string
+		foreach ($files as $name) {
+			$url =
+				"https://commons.wikimedia.org/w/api.php" .
+				"?action=wbgetentities&sites=commonswiki" .
+				"&titles=" . rawurlencode("File:{$name}") .
+				"&props=claims&format=json";
+			$j = $this->httpClient->getJson($url);
+			if (!isset($j->entities)) {
+				continue;
+			}
+			// The single returned entity (M<id>) is keyed by ID.
+			$entity = null;
+			foreach ((array) $j->entities as $_id => $e) {
+				$entity = $e;
+				break;
+			}
+			if (!isset($entity->claims->P180)) {
+				continue;
+			}
+			$p180 = $entity->claims->P180;
+			if (!is_array($p180) || count($p180) !== 1) {
+				continue; // require exactly one P180 to avoid ambiguity
+			}
+			$target = $p180[0]->mainsnak->datavalue->value->id ?? null;
+			if (!is_string($target) || !preg_match('~^Q\d+$~', $target)) {
+				continue;
+			}
+			$fileToFilm[$name] = $target;
+		}
+		if (count($fileToFilm) === 0) {
+			return;
+		}
+
+		// 3. Verify each candidate film is a film AND lacks a P10
+		//    statement entirely. The "no P10 yet" rule is conservative —
+		//    if the film already has even one P10 statement, leave it
+		//    alone rather than risk wrong/duplicate additions.
+		$valuesList = "wd:" . implode(" wd:", array_values($fileToFilm));
+		$sparql =
+			"SELECT ?q WHERE {
+				VALUES ?q { {$valuesList} }
+				?q wdt:P31/wdt:P279* wd:Q11424 .
+				FILTER NOT EXISTS { ?q wdt:P10 ?_x }
+			}";
+
+		$verifiedFilms = [];
+		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+			$q = $this->tfc->parseItemFromURL((string) ($row["q"] ?? ""));
+			if ($q !== "") {
+				$verifiedFilms[$q] = true;
+			}
+		}
+		if (count($verifiedFilms) === 0) {
+			return;
+		}
+
+		// 4. Emit QS commands.
+		$commands = [];
+		foreach ($fileToFilm as $name => $film_q) {
+			if (!isset($verifiedFilms[$film_q])) {
+				continue;
+			}
+			$q_numeric = (int) preg_replace("|\D|", "", $film_q);
+			if ($q_numeric <= 0) {
+				continue;
+			}
+			$name_safe = addslashes($name);
+			$commands[] = "Q{$q_numeric}\tP10\t\"{$name_safe}\"\t/* WikiFlix C2: via P180 in Commons category */";
+		}
+		$this->pushQuickStatements($commands);
+	}
+
+	/**
+	 * Conservative bot pass: stamp P6216=Q19652 (public domain) on films
+	 * dated before 1900 that have no copyright-status statement at all.
+	 *
+	 * Pre-1900 films are PD in every jurisdiction with a finite copyright
+	 * term — the most lenient term (life + 100) covers anyone who lived
+	 * to a plausible age. P459=Q47246828 ("published more than 95 years
+	 * ago") is added as the determination-method qualifier, matching the
+	 * Wikidata convention used on 32,954 existing film P6216 statements.
+	 *
+	 * Bounded by self::PRE_1900_PD_PER_RUN. The current candidate pool
+	 * is ~86 films, so a single run usually clears it.
+	 */
+	public function annotate_pre_1900_public_domain(): void
+	{
+		$sparql =
+			"SELECT DISTINCT ?q WHERE {
+				?q wdt:P31/wdt:P279* wd:Q11424 ;
+				   wdt:P577 ?date .
+				FILTER(YEAR(?date) < 1900)
+				FILTER NOT EXISTS { ?q wdt:P6216 ?_status }
+				MINUS { ?q wdt:P31 wd:Q97570383 }
+			}";
+
+		$commands = [];
+		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+			if (count($commands) >= self::PRE_1900_PD_PER_RUN) {
+				break;
+			}
+			$q = $this->tfc->parseItemFromURL((string) ($row["q"] ?? ""));
+			$q_numeric = (int) preg_replace("|\D|", "", (string) $q);
+			if ($q_numeric <= 0) {
+				continue;
+			}
+			$commands[] = "Q{$q_numeric}\tP6216\tQ19652\tP459\tQ47246828\t/* WikiFlix C1: pre-1900 film, PD by age */";
+		}
+
+		$this->pushQuickStatements($commands);
 	}
 
 	private static function parse_seconds(string $s): int
