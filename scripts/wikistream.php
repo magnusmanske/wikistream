@@ -750,9 +750,9 @@ class WikiStream
 		}
 	}
 
-	public function get_recently_added($num = 25, $section_q = null): array
+	public function get_recently_added($num = 25, $section_q = null, $offset = 0): array
 	{
-		return $this->get_item_view("vw_recently_added", $num, $section_q);
+		return $this->get_item_view("vw_recently_added", $num, $section_q, null, $offset);
 	}
 
 	/**
@@ -761,26 +761,41 @@ class WikiStream
 	 * "Highly ranked"). Built-in keys are handled here; tool-specific
 	 * keys (e.g. WikiFlix's "Female directors") are delegated to the
 	 * config class.
+	 *
+	 * Returns ['entries' => [...], 'total' => int]. `total` is the total
+	 * number of entries available for this key (independent of offset/limit)
+	 * so the caller can render pagination state.
 	 */
-	public function get_special_entries(string $key, int $max = PHP_INT_MAX): array
+	public function get_special_entries(string $key, int $offset = 0, int $limit = PHP_INT_MAX): array
 	{
 		switch ($key) {
 			case "recently_edited":
-				return $this->get_recently_added($max);
+				return [
+					"entries" => $this->get_recently_added($limit, null, $offset),
+					"total"   => $this->get_item_view_count("vw_recently_added"),
+				];
 			case "highly_ranked":
-				return $this->get_ranked_items($max);
+				return [
+					"entries" => $this->get_ranked_items($limit, null, $offset),
+					"total"   => $this->get_item_view_count("vw_ranked_entries_blacklist"),
+				];
 			case "popular_entries":
-				return $this->get_item_view("vw_popular_entries", $max);
+				return [
+					"entries" => $this->get_item_view("vw_popular_entries", $limit, null, null, $offset),
+					"total"   => $this->get_item_view_count("vw_popular_entries"),
+				];
 		}
-		return $this->config->get_special_entries($this, $key, $max);
+		return $this->config->get_special_entries($this, $key, $offset, $limit);
 	}
 
-	public function get_ranked_items($num = 25, $section_q = null): array
+	public function get_ranked_items($num = 25, $section_q = null, $offset = 0): array
 	{
 		return $this->get_item_view(
 			"vw_ranked_entries_blacklist",
 			$num,
 			$section_q,
+			null,
+			$offset,
 		);
 	}
 
@@ -789,8 +804,11 @@ class WikiStream
 		$num = 25,
 		$section_q = null,
 		$subquery = null,
+		$offset = 0,
 	): array {
 		$ret = [];
+		$num_safe    = max(0, (int) $num);
+		$offset_safe = max(0, (int) $offset);
 		$sql = "SELECT * FROM `{$view_name}` WHERE 1=1";
 		if (isset($section_q) and $section_q != null) {
 			$sql .= " AND `q` IN (SELECT item_q FROM section WHERE section_q={$section_q})";
@@ -798,7 +816,10 @@ class WikiStream
 		if ($subquery != null) {
 			$sql .= " AND q IN ({$subquery})";
 		}
-		$sql .= " LIMIT {$num}";
+		$sql .= " LIMIT {$num_safe}";
+		if ($offset_safe > 0) {
+			$sql .= " OFFSET {$offset_safe}";
+		}
 		$result = $this->tfc->getSQL($this->db, $sql);
 		while ($o = $result->fetch_object()) {
 			$this->fix_item_image($o);
@@ -808,11 +829,14 @@ class WikiStream
 		return $ret;
 	}
 
-	protected function get_item_view_count($view_name, $section_q = null): int
+	public function get_item_view_count($view_name, $section_q = null, $subquery = null): int
 	{
 		$sql = "SELECT COUNT(*) AS `cnt` FROM `{$view_name}` WHERE 1=1";
 		if (isset($section_q) and $section_q != null) {
 			$sql .= " AND `q` IN (SELECT item_q FROM section WHERE section_q={$section_q})";
+		}
+		if ($subquery != null) {
+			$sql .= " AND q IN ({$subquery})";
 		}
 		$result = $this->tfc->getSQL($this->db, $sql);
 		$cnt = 0;
@@ -1104,11 +1128,11 @@ class WikiStream
 		return $out;
 	}
 
-	public function populate_section($section, $item, $max = 25): array
+	public function populate_section($section, $item, $max = 25, $offset = 0): array
 	{
 		$title = $item->getLabel();
 		$total = $this->get_item_view_count("vw_ranked_entries_blacklist", $section->section_q);
-		$entries = $this->get_ranked_items($max, $section->section_q);
+		$entries = $this->get_ranked_items($max, $section->section_q, $offset);
 		return [
 			"q" => $section->section_q,
 			"title" => $title,

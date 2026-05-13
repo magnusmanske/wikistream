@@ -468,6 +468,145 @@ final class WikiStreamTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // get_item_view — offset support
+    // ------------------------------------------------------------------
+
+    public function test_get_item_view_emits_offset_when_nonzero(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $captured = '';
+        $tfc->expects($this->once())
+            ->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->get_item_view('vw_ranked_entries', 25, null, null, 50);
+        $this->assertStringContainsString('LIMIT 25', $captured);
+        $this->assertStringContainsString('OFFSET 50', $captured);
+    }
+
+    public function test_get_item_view_omits_offset_when_zero(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $captured = '';
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->get_item_view('vw_ranked_entries', 25);
+        $this->assertStringContainsString('LIMIT 25', $captured);
+        $this->assertStringNotContainsString('OFFSET', $captured);
+    }
+
+    public function test_get_item_view_clamps_negative_offset(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $captured = '';
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->get_item_view('vw_ranked_entries', 25, null, null, -100);
+        $this->assertStringNotContainsString('OFFSET', $captured);
+    }
+
+    // ------------------------------------------------------------------
+    // get_special_entries — pagination shape
+    // ------------------------------------------------------------------
+
+    public function test_get_special_entries_returns_entries_and_total(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $entry = new \stdClass();
+        $entry->q = 42;
+        $entry->title = 'Foo';
+        $entry->image = null;
+
+        $count = new \stdClass();
+        $count->cnt = 137;
+
+        $callCount = 0;
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$callCount, $entry, $count) {
+                $callCount++;
+                if (stripos($sql, 'SELECT *') === 0) {
+                    $this->assertStringContainsString('OFFSET 50', $sql);
+                    return $this->makeResult([$entry]);
+                }
+                if (stripos($sql, 'SELECT COUNT(*)') === 0) {
+                    return $this->makeResult([$count]);
+                }
+                return $this->emptyResult();
+            });
+
+        $page = $ws->get_special_entries('popular_entries', 50, 25);
+        $this->assertArrayHasKey('entries', $page);
+        $this->assertArrayHasKey('total', $page);
+        $this->assertCount(1, $page['entries']);
+        $this->assertSame(42, $page['entries'][0]->q);
+        $this->assertSame(137, $page['total']);
+    }
+
+    public function test_get_special_entries_unknown_key_delegates_to_config(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        // WikiFlix config returns ['entries' => [], 'total' => 0] for unknown keys.
+        $tfc->method('getSQL')->willReturn($this->emptyResult());
+
+        $page = $ws->get_special_entries('not_a_real_key', 0, 10);
+        $this->assertSame(['entries' => [], 'total' => 0], $page);
+    }
+
+    // ------------------------------------------------------------------
+    // populate_section — offset threads through
+    // ------------------------------------------------------------------
+
+    public function test_populate_section_threads_offset(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        // Stub item with a label.
+        $j = new \stdClass();
+        $j->id = 'Q1';
+        $item = new \WikidataItem($j);
+        // Override getLabel via a tiny anonymous subclass.
+        $item = new class($j) extends \WikidataItem {
+            public function getLabel(string $lang = 'en'): string { return 'Sample'; }
+        };
+
+        $section = (object) ['section_q' => 7, 'property' => 31];
+
+        $offsetSql = '';
+        $countResult = (object) ['cnt' => 99];
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$offsetSql, $countResult) {
+                if (stripos($sql, 'SELECT *') === 0) {
+                    $offsetSql = $sql;
+                    return $this->emptyResult();
+                }
+                if (stripos($sql, 'SELECT COUNT(*)') === 0) {
+                    return $this->makeResult([$countResult]);
+                }
+                return $this->emptyResult();
+            });
+
+        $result = $ws->populate_section($section, $item, 25, 100);
+        $this->assertSame(99, $result['total']);
+        $this->assertSame('Sample', $result['title']);
+        $this->assertStringContainsString('OFFSET 100', $offsetSql);
+    }
+
+    // ------------------------------------------------------------------
     // import_commons_video_minutes — batched titles, title-normalisation,
     // duplicate-key handling
     // ------------------------------------------------------------------

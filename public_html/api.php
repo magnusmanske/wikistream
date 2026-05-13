@@ -35,13 +35,28 @@ if ( $action=='get_entry' ) {
 } else if ( $action=='get_random_entry' ) {
 	$out['data'] = [ 'q' => $ws->getRandomEntryQ() ];
 } else if ( $action=='get_special' ) {
-	$key = preg_replace('|[^a-z_]|','',$ws->tfc->getRequest('key',''));
-	$max = $ws->tfc->getRequest('max','all');
-	$max = ($max==='all') ? PHP_INT_MAX : (int) $max;
-	$out['data'] = [
-		'key' => $key,
-		'entries' => $key === '' ? [] : $ws->get_special_entries($key, $max),
-	];
+	$key    = preg_replace('|[^a-z_]|','',$ws->tfc->getRequest('key',''));
+	$offset = max(0, (int) $ws->tfc->getRequest('offset', 0));
+	# Pagination via `limit`; `max=all` retained for legacy callers.
+	$limit_raw = $ws->tfc->getRequest('limit', null);
+	if ($limit_raw === null) {
+		$max_raw = $ws->tfc->getRequest('max', 'all');
+		$limit   = ($max_raw === 'all') ? PHP_INT_MAX : max(0, (int) $max_raw);
+	} else {
+		$limit = max(0, (int) $limit_raw);
+	}
+	if ($key === '') {
+		$out['data'] = [ 'key' => '', 'entries' => [], 'total' => 0 ];
+	} else {
+		$page = $ws->get_special_entries($key, $offset, $limit);
+		$out['data'] = [
+			'key'     => $key,
+			'entries' => $page['entries'] ?? [],
+			'total'   => isset($page['total']) ? (int) $page['total'] : 0,
+			'offset'  => $offset,
+			'limit'   => $limit,
+		];
+	}
 } else if ( $action=='get_all_sections' ) {
 	$out['data'] = $ws->get_top_sections(PHP_INT_MAX);
 } else if ( $action=='get_your_list' ) {
@@ -64,9 +79,14 @@ if ( $action=='get_entry' ) {
 	}
 } else if ( $action=='get_section' ) {
 	# ATTENTION always assumes property is set
-	$max = $ws->tfc->getRequest('max',25);
-	if ($max=='all') $max = PHP_INT_MAX;
-	else $max = $max*1;
+	$offset = max(0, (int) $ws->tfc->getRequest('offset', 0));
+	$limit_raw = $ws->tfc->getRequest('limit', null);
+	if ($limit_raw === null) {
+		$max_raw = $ws->tfc->getRequest('max', 25);
+		$limit   = ($max_raw === 'all') ? PHP_INT_MAX : max(0, (int) $max_raw);
+	} else {
+		$limit = max(0, (int) $limit_raw);
+	}
 	$section = (object) [
 		'section_q' => $ws->tfc->getRequest('q',0)*1,
 		'property' => $ws->tfc->getRequest('prop',0)*1,
@@ -74,8 +94,14 @@ if ( $action=='get_entry' ) {
 	$wil = new WikidataItemList();
 	$wil->loadItems([$section->section_q]);
 	$item = $wil->getItem($section->section_q);
-	if ( isset($item) ) $out['data'] = $ws->populate_section($section,$item,$max);
-	else $out['status'] = "No such item Q{$section->section_q}";
+	if ( isset($item) ) {
+		$populated = $ws->populate_section($section, $item, $limit, $offset);
+		$populated['offset'] = $offset;
+		$populated['limit']  = $limit;
+		$out['data'] = $populated;
+	} else {
+		$out['status'] = "No such item Q{$section->section_q}";
+	}
 } else if ( $action=='search' ) {
 	$query = $ws->tfc->getRequest('query','');
 	$out['data']['entries'] = $ws->search_entries($query);

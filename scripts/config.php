@@ -22,11 +22,14 @@
 	/**
 	 * Tool-specific dispatch for WikiStream::get_special_entries(). Override
 	 * in a subclass to add custom pseudo-section keys (e.g. "female_directors"
-	 * in WikiFlix). The base implementation returns an empty list.
+	 * in WikiFlix). The base implementation returns an empty page.
+	 *
+	 * Returns ['entries' => list, 'total' => int]. `total` is the total count
+	 * of entries available for this key (independent of offset/limit).
 	 */
-	public function get_special_entries(&$ws, string $key, int $max = PHP_INT_MAX): array
+	public function get_special_entries(&$ws, string $key, int $offset = 0, int $limit = PHP_INT_MAX): array
 	{
-		return [];
+		return ['entries' => [], 'total' => 0];
 	}
 }
 
@@ -92,15 +95,34 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig
 		];
 	}
 
-	public function get_special_entries(&$ws, string $key, int $max = PHP_INT_MAX): array
+	const FEMALE_DIRECTORS_SUBQUERY = 'SELECT DISTINCT `item_q` FROM `section`,`person` WHERE `property`=57 AND `person`.`q`=`section_q` AND `person`.`gender`="F"';
+
+	public function get_special_entries(&$ws, string $key, int $offset = 0, int $limit = PHP_INT_MAX): array
 	{
 		switch ($key) {
 			case "female_directors":
-				return $this->get_items_by_female_directors($ws, $max);
+				return [
+					'entries' => $ws->get_item_view(
+						"vw_ranked_entries_blacklist",
+						$limit,
+						null,
+						self::FEMALE_DIRECTORS_SUBQUERY,
+						$offset,
+					),
+					'total' => $ws->get_item_view_count(
+						"vw_ranked_entries_blacklist",
+						null,
+						self::FEMALE_DIRECTORS_SUBQUERY,
+					),
+				];
 		}
-		return [];
+		return ['entries' => [], 'total' => 0];
 	}
 
+	/**
+	 * Back-compat helper for older main-page callers that just want a single
+	 * page of female-director entries.
+	 */
 	protected function get_items_by_female_directors(
 		&$ws,
 		$num = 25,
@@ -110,7 +132,7 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig
 			"vw_ranked_entries_blacklist",
 			$num,
 			$section_q,
-			'SELECT DISTINCT `item_q` FROM `section`,`person` WHERE `property`=57 AND `person`.`q`=`section_q` AND `person`.`gender`="F"'
+			self::FEMALE_DIRECTORS_SUBQUERY,
 		);
 	}
 }
