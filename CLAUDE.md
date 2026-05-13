@@ -7,6 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Do not add the Claude attribution to commit messages.** No `Co-Authored-By: Claude …` line.
 - **Never alter the production database**, no additions, alterations, deletions, unless specifically told to.
+- **Never write/alter/add/delete files in `public_html/resources` or `public_html/php`** — these are synced from the Magnus-tools shared library. Exceptions: wikistream-specific files inside `public_html/resources/js_es6/` and `public_html/resources/vue_es6/` are allowed.
+- **Assume the CDNs are safe.** `tools-static.wmflabs.org`, `cdnjs.cloudflare.com`, and `upload.wikimedia.org` do not need Subresource Integrity (`integrity=`) attributes.
 - This is a web-facing product, so **keep security in mind**.
 - Always keep **code readability and long-term maintenance** in mind.
 - Adhere to **SOLID and DRY principles**.

@@ -1,0 +1,47 @@
+<!DOCTYPE HTML>
+<html><head>
+<META NAME="ROBOTS" CONTENT="NOINDEX, NOFOLLOW">
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title tt="toolname"></title>
+
+<!-- Parallel Vue 2.7 + Composition API build. -->
+<!-- The production entry is index.html until this is feature-complete. -->
+
+<link rel="stylesheet" href="https://tools-static.wmflabs.org/cdnjs/ajax/libs/twitter-bootstrap/4.6.2/css/bootstrap.min.css">
+<link rel="stylesheet" href="resources/vue_es6/styles.css">
+<link rel="stylesheet" href="resources/vue_es6/wikistream/styles.css">
+
+<!-- Classic scripts: must load before the ES6 module. -->
+<script src="https://tools-static.wmflabs.org/cdnjs/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="https://tools-static.wmflabs.org/cdnjs/ajax/libs/twitter-bootstrap/4.6.2/js/bootstrap.bundle.min.js"></script>
+<script src="https://tools-static.wmflabs.org/cdnjs/ajax/libs/vue/2.7.16/vue.min.js"></script>
+<script src="https://tools-static.wmflabs.org/cdnjs/ajax/libs/vue-router/3.6.5/vue-router.min.js"></script>
+<script src="https://tools-static.wmflabs.org/tooltranslate/tt.js"></script>
+<script src="https://tools-static.wmflabs.org/magnustools/resources/js/wikidata.js"></script>
+<script src="config.js"></script>
+
+<style>
+#working { display: none; }
+body {
+    background-color: black;
+    color: white;
+    margin-left: 0.5rem;
+    margin-right: 0.5rem;
+}
+.h3, h3 {
+    margin-top: 2rem;
+    margin-bottom: 1.5rem;
+}
+</style>
+
+</head>
+
+<body>
+    <div id="app">
+        <router-view :key="$route.path"><i tt="loading"></i></router-view>
+    </div>
+
+<script type="module" src="resources/vue_es6/wikistream/main.js"></script>
+
+</body>
+</html>
