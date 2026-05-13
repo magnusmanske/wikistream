@@ -986,16 +986,12 @@ class WikiStream
 			$out["sections"][] = $this->populate_section($section, $item);
 		}
 
-		$sql = "SELECT count(*) AS `cnt` FROM `item`";
+		// One round-trip for the top-level totals instead of three.
+		$sql = "SELECT (SELECT COUNT(*) FROM `item`) AS `items`, (SELECT COUNT(*) FROM `person`) AS `people`";
 		$result = $this->tfc->getSQL($this->db, $sql);
 		if ($o = $result->fetch_object()) {
-			$out["entry_total"] = $o->cnt;
-		}
-
-		$sql = "SELECT count(*) AS `cnt` FROM `person`";
-		$result = $this->tfc->getSQL($this->db, $sql);
-		if ($o = $result->fetch_object()) {
-			$out["person_total"] = $o->cnt;
+			$out["entry_total"]  = $o->items;
+			$out["person_total"] = $o->people;
 		}
 
 		$out["section_total"] = $this->get_top_sections_count();
