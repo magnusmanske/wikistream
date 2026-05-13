@@ -14,11 +14,13 @@
   top: 0;
   bottom: 0;
 }
-.play-stage iframe {
+.play-stage iframe,
+.play-stage video {
   display: block;
   width: 100%;
   height: 100%;
   border: 0;
+  background: black;
 }
 .play-fullscreen-btn {
   position: absolute;
@@ -76,8 +78,17 @@
   <div class="container-fluid">
     <page-header v-if="!is_fullscreen"></page-header>
     <div class="play-stage" ref="stage">
+      <video
+        v-if="native_video_url"
+        ref="video"
+        :src="native_video_url"
+        controls
+        playsinline
+        preload="metadata"
+      ></video>
+
       <iframe
-        v-if="embed_url"
+        v-else-if="embed_url"
         :src="embed_url"
         :allow="iframe_allow"
         frameborder="0"
@@ -91,7 +102,7 @@
       </div>
 
       <button
-        v-if="embed_url && !is_fullscreen"
+        v-if="playable && !is_fullscreen"
         type="button"
         class="play-fullscreen-btn"
         @click="enterFullscreen"
@@ -129,9 +140,18 @@
       encoded_key: function () {
         return encodeURIComponent(this.source_key);
       },
+      native_video_url: function () {
+        // Commons videos use a native <video> element so we can call .play()
+        // in the fullscreen-button click handler. The MediaWiki TMH iframe is
+        // cross-origin and has no autoplay URL parameter.
+        if (this.prop_id !== 10) return null;
+        return (
+          "https://commons.wikimedia.org/wiki/Special:FilePath/" +
+          this.encoded_key
+        );
+      },
       embed_url: function () {
         switch (this.prop_id) {
-          case 10:
           case 51:
             return (
               "https://commons.wikimedia.org/wiki/File:" +
@@ -164,6 +184,9 @@
             );
         }
         return null;
+      },
+      playable: function () {
+        return this.embed_url !== null || this.native_video_url !== null;
       },
       iframe_allow: function () {
         return "autoplay; encrypted-media; fullscreen; picture-in-picture";
@@ -217,19 +240,26 @@
     methods: {
       enterFullscreen: function () {
         const el = this.$refs.stage;
-        if (!el || !this.embed_url) return;
+        if (!el || !this.playable) return;
         const req =
           el.requestFullscreen ||
           el.webkitRequestFullscreen ||
           el.mozRequestFullScreen;
-        if (!req) return;
-        try {
-          const result = req.call(el);
-          if (result && typeof result.catch === "function") {
-            result.catch(function () {});
+        if (req) {
+          try {
+            const result = req.call(el);
+            if (result && typeof result.catch === "function") {
+              result.catch(function () {});
+            }
+          } catch (e) {
+            // Browser blocked fullscreen (no user gesture, iOS, etc.) — degrade silently.
           }
-        } catch (e) {
-          // Browser blocked fullscreen (no user gesture, iOS, etc.) — degrade silently.
+        }
+        // Start playback for native <video> in the user-gesture context.
+        const v = this.$refs.video;
+        if (v && typeof v.play === "function") {
+          const p = v.play();
+          if (p && typeof p.catch === "function") p.catch(function () {});
         }
       },
       onFullscreenChange: function () {

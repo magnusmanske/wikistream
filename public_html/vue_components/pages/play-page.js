@@ -2,7 +2,11 @@
  * <play-page> — full-screen video player for an item.
  *
  * Supported source properties:
- *   P10, P51    – Commons file (via MediaWiki TimedMediaHandler iframe)
+ *   P10         – Commons video, rendered as a native HTML5 <video> so we
+ *                 can call .play() in the fullscreen-button click handler
+ *                 (the MediaWiki TimedMediaHandler iframe is cross-origin
+ *                 and exposes no autoplay parameter)
+ *   P51         – Commons audio (WikiVibes) via the TimedMediaHandler iframe
  *   P724        – Internet Archive
  *   P4015       – Vimeo
  *   P11731      – DailyMotion
@@ -27,14 +31,20 @@ export default {
     props: ['source_prop', 'source_key'],
     setup(props) {
         const stage = ref(null);
+        const video = ref(null);
 
         const prop_id = computed(() => parseInt(props.source_prop, 10));
         const encoded_key = computed(() => encodeURIComponent(props.source_key));
 
+        // Commons videos use a native <video> element (see file header for why).
+        const native_video_url = computed(() => {
+            if (prop_id.value !== 10) return null;
+            return `https://commons.wikimedia.org/wiki/Special:FilePath/${encoded_key.value}`;
+        });
+
         const embed_url = computed(() => {
             const key = encoded_key.value;
             switch (prop_id.value) {
-                case 10:
                 case 51:
                     return `https://commons.wikimedia.org/wiki/File:${key}?embedplayer=yes`;
                 case 724:
@@ -69,8 +79,20 @@ export default {
             return null;
         });
 
-        const embeddable = computed(() => embed_url.value !== null);
-        const { is_fullscreen, enterFullscreen } = useFullscreen(stage, embeddable);
+        const playable = computed(
+            () => embed_url.value !== null || native_video_url.value !== null,
+        );
+        const { is_fullscreen, enterFullscreen } = useFullscreen(stage, playable, {
+            // When the user clicks the fullscreen button, also start playback
+            // of the native <video>. The Commons MediaWiki embed iframe has no
+            // autoplay parameter and is cross-origin, so this is the only way
+            // to start playback in a user-gesture context.
+            onAfterEnter() {
+                if (!video.value) return;
+                const p = video.value.play();
+                if (p && typeof p.catch === 'function') p.catch(() => {});
+            },
+        });
 
         const { log } = useLog();
         log('play_page_loaded', {
@@ -80,10 +102,13 @@ export default {
 
         return {
             stage,
+            video,
             is_fullscreen,
             embed_url,
+            native_video_url,
             iframe_allow,
             external_link,
+            playable,
             enterFullscreen,
         };
     },
@@ -91,8 +116,17 @@ export default {
         <div class="container-fluid">
             <page-header v-if="!is_fullscreen"></page-header>
             <div class="play-stage" ref="stage">
+                <video
+                    v-if="native_video_url"
+                    ref="video"
+                    :src="native_video_url"
+                    controls
+                    playsinline
+                    preload="metadata"
+                ></video>
+
                 <iframe
-                    v-if="embed_url"
+                    v-else-if="embed_url"
                     :src="embed_url"
                     :allow="iframe_allow"
                     frameborder="0"
@@ -106,7 +140,7 @@ export default {
                 </div>
 
                 <button
-                    v-if="embed_url && !is_fullscreen"
+                    v-if="playable && !is_fullscreen"
                     type="button"
                     class="play-fullscreen-btn"
                     @click="enterFullscreen"

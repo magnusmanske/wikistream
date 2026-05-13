@@ -7,13 +7,19 @@
  *
  * @param {import('vue').Ref<HTMLElement|null>} targetRef – ref pointing at the element
  * @param {import('vue').Ref<boolean>}          enabledRef – when false, skip fullscreen attempts (e.g. unknown source)
+ * @param {Object} [options]
+ * @param {() => void} [options.onAfterEnter] – callback invoked after the
+ *        fullscreen request is dispatched. Runs in the same call stack so the
+ *        user-gesture context is preserved (useful for calling `play()` on a
+ *        native <video> element from a click handler).
  * @returns {{ is_fullscreen: import('vue').Ref<boolean>, enterFullscreen: () => void }}
  */
 const { ref, onMounted, onBeforeUnmount, nextTick } = Vue;
 
-export function useFullscreen(targetRef, enabledRef) {
+export function useFullscreen(targetRef, enabledRef, options = {}) {
     const is_fullscreen = ref(false);
     let handler = null;
+    const onAfterEnter = typeof options.onAfterEnter === 'function' ? options.onAfterEnter : null;
 
     function enterFullscreen() {
         const el = targetRef.value;
@@ -22,15 +28,17 @@ export function useFullscreen(targetRef, enabledRef) {
             el.requestFullscreen ||
             el.webkitRequestFullscreen ||
             el.mozRequestFullScreen;
-        if (!req) return;
-        try {
-            const result = req.call(el);
-            if (result && typeof result.catch === 'function') {
-                result.catch(() => {});
+        if (req) {
+            try {
+                const result = req.call(el);
+                if (result && typeof result.catch === 'function') {
+                    result.catch(() => {});
+                }
+            } catch (_) {
+                // Browser blocked fullscreen (no user gesture, iOS, etc.) — silent.
             }
-        } catch (_) {
-            // Browser blocked fullscreen (no user gesture, iOS, etc.) — silent.
         }
+        if (onAfterEnter) onAfterEnter();
     }
 
     function onFullscreenChange() {
