@@ -902,6 +902,9 @@ final class WikiStreamTest extends TestCase
         $this->assertSame(\WikiStream::PRE_1900_PD_PER_RUN, count($ws->capturedCommands));
     }
 
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
     public function test_annotate_pre_1900_public_domain_no_candidates_skips_qs(): void
     {
         $db = $this->makeFakeDb();
