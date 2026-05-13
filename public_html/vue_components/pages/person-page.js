@@ -62,7 +62,7 @@ export default {
                                 <h2>{{person.label}}</h2>
                                 <div style="margin-left:1rem;">
                                     <a :href="'https://www.wikidata.org/wiki/Q'+person.q" class="wikidata" target="_blank" rel="noopener">
-                                        <img border="0" src="https://upload.wikimedia.org/wikipedia/commons/thumb/7/71/Wikidata.svg/330px-Wikidata.svg.png" width="32px" />
+                                        <img border="0" decoding="async" src="https://upload.wikimedia.org/wikipedia/commons/thumb/7/71/Wikidata.svg/330px-Wikidata.svg.png" width="32px" />
                                     </a>
                                 </div>
                             </div>
