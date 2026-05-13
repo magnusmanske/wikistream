@@ -54,6 +54,7 @@ class WikiStream
 			$ret->gender = $o->gender;
 			$ret->image = $o->image;
 		}
+		$this->freeResult($result);
 
 		if ($add_files) {
 			$sql =
@@ -65,6 +66,7 @@ class WikiStream
 				$this->fix_item_image($o);
 				$ret->entries[] = $o;
 			}
+			$this->freeResult($result);
 		}
 		return $ret;
 	}
@@ -83,6 +85,7 @@ class WikiStream
 		while ($o = $result->fetch_object()) {
 			$people[(int) $o->q] = $o;
 		}
+		$this->freeResult($result);
 		return $people;
 	}
 
@@ -90,10 +93,12 @@ class WikiStream
 	{
 		$sql = "SELECT `q` FROM `vw_ranked_entries` ORDER BY RAND() LIMIT 1";
 		$result = $this->tfc->getSQL($this->db, $sql);
+		$q = null;
 		if ($o = $result->fetch_object()) {
-			return (int) $o->q;
+			$q = (int) $o->q;
 		}
-		return null;
+		$this->freeResult($result);
+		return $q;
 	}
 
 	public function getEntry($q): ?object
@@ -105,8 +110,10 @@ class WikiStream
 		if ($o = $result->fetch_object()) {
 			$ret = $o;
 		} else {
+			$this->freeResult($result);
 			return null;
 		} // Nothing
+		$this->freeResult($result);
 
 		$o->entry_files = json_decode($o->files);
 
@@ -130,6 +137,7 @@ class WikiStream
 				$to_load[] = $o->section_q;
 			}
 		}
+		$this->freeResult($result);
 
 		// Batch-fetch all person records in a single query
 		$person_qs = array_map(fn($r) => $r->section_q, $person_rows);
@@ -174,6 +182,7 @@ class WikiStream
 		while ($o = $result->fetch_object()) {
 			$ret["Q{$o->q}"] = $o->q;
 		}
+		$this->freeResult($result);
 		return $ret;
 	}
 
@@ -186,6 +195,7 @@ class WikiStream
 		while ($o = $result->fetch_object()) {
 			$rows[] = $o;
 		}
+		$this->freeResult($result);
 		if (empty($rows)) {
 			return;
 		}
@@ -588,6 +598,17 @@ class WikiStream
 		$this->tfc->getSQL($this->db, "ROLLBACK");
 	}
 
+	/**
+	 * Free a mysqli result set if the object supports it. Defensive against
+	 * test-harness fakes that don't implement free().
+	 */
+	protected function freeResult($result): void
+	{
+		if (is_object($result) && method_exists($result, 'free')) {
+			$result->free();
+		}
+	}
+
 	public function add_missing_item_details(): void
 	{
 		$sql = "SELECT `q` FROM `item` WHERE `available`=0";
@@ -596,6 +617,7 @@ class WikiStream
 		while ($o = $result->fetch_object()) {
 			$qs[] = $o->q;
 		}
+		$this->freeResult($result);
 		if (count($qs) == 0) {
 			return;
 		} # Nothing to do
@@ -716,6 +738,7 @@ class WikiStream
 			$this->fix_item_image($o);
 			$ret[] = $o;
 		}
+		$this->freeResult($result);
 		return $ret;
 	}
 
@@ -726,10 +749,12 @@ class WikiStream
 			$sql .= " AND `q` IN (SELECT item_q FROM section WHERE section_q={$section_q})";
 		}
 		$result = $this->tfc->getSQL($this->db, $sql);
+		$cnt = 0;
 		if ($o = $result->fetch_object()) {
-			return (int) $o->cnt;
+			$cnt = (int) $o->cnt;
 		}
-		return 0;
+		$this->freeResult($result);
+		return $cnt;
 	}
 
 	protected function fix_item_image(&$o): object
@@ -813,6 +838,7 @@ class WikiStream
 		while ($o = $result->fetch_object()) {
 			$qs[] = $o->q * 1;
 		}
+		$this->freeResult($result);
 		foreach (array_chunk($qs, 50) as $chunk) {
 			$wil = new WikidataItemList();
 			$wil->loadItems($chunk);
@@ -864,6 +890,7 @@ class WikiStream
 		while ($o = $result->fetch_object()) {
 			$ret[] = $o;
 		}
+		$this->freeResult($result);
 		return $ret;
 	}
 
@@ -888,10 +915,12 @@ class WikiStream
 			implode(",", $skip_section_q) .
 			")";
 		$result = $this->tfc->getSQL($this->db, $sql);
+		$cnt = 0;
 		if ($o = $result->fetch_object()) {
-			return (int) $o->cnt;
+			$cnt = (int) $o->cnt;
 		}
-		return 0;
+		$this->freeResult($result);
+		return $cnt;
 	}
 
 	public function get_random_sections(
@@ -921,6 +950,7 @@ class WikiStream
 		while ($o = $result->fetch_object()) {
 			$ret[] = $o;
 		}
+		$this->freeResult($result);
 		return $ret;
 	}
 
@@ -937,6 +967,7 @@ class WikiStream
 			}
 			$ret[$decade][] = $o;
 		}
+		$this->freeResult($result);
 		ksort($ret, SORT_NUMERIC);
 		return $ret;
 	}
@@ -993,6 +1024,7 @@ class WikiStream
 			$out["entry_total"]  = $o->items;
 			$out["person_total"] = $o->people;
 		}
+		$this->freeResult($result);
 
 		$out["section_total"] = $this->get_top_sections_count();
 
@@ -1034,6 +1066,7 @@ class WikiStream
 		while ($o = $result->fetch_object()) {
 			$sections[] = $o;
 		}
+		$this->freeResult($result);
 
 		$qs = [];
 		foreach ($sections as $section) {
@@ -1065,6 +1098,7 @@ class WikiStream
 			$this->fix_item_image($o);
 			$ret[] = $o;
 		}
+		$this->freeResult($result);
 		return $ret;
 	}
 
@@ -1080,6 +1114,7 @@ class WikiStream
 		while ($o = $result->fetch_object()) {
 			$ret[] = $o;
 		}
+		$this->freeResult($result);
 		return $ret;
 	}
 
@@ -1094,6 +1129,7 @@ class WikiStream
 		while ($o = $result->fetch_object()) {
 			$qs[] = $o->section_q;
 		}
+		$this->freeResult($result);
 		foreach (array_chunk($qs, 50) as $chunk) {
 			$wil = new WikidataItemList();
 			$wil->loadItems($chunk);
@@ -1171,6 +1207,7 @@ class WikiStream
 			$sql = "REPLACE INTO `logging` (`timestamp`,`event`,`q`,`counter`) VALUES ('{$ts_safe}','total_people',0,{$o->people})";
 			$this->tfc->getSQL($this->db, $sql);
 		}
+		$this->freeResult($result);
 	}
 
 	public function import_item_whitelist(): void
@@ -1412,6 +1449,7 @@ class WikiStream
 		while ($o = $result->fetch_object()) {
 			$existing_qs["Q{$o->q}"] = $o->q;
 		}
+		$this->freeResult($result);
 
 		# Get all candidate items
 		$sparql = "SELECT DISTINCT ?q ?qLabel (year(?date) AS ?year) ?duration ?sitelinks {
@@ -1515,10 +1553,17 @@ class WikiStream
 		# Internet Archive
 		$sql = "SELECT * FROM `item_no_files` WHERE `ia_results` IS NULL LIMIT 100";
 		$result = $this->tfc->getSQL($this->db, $sql);
+		// Buffer rows first so we can free the result set before issuing
+		// per-row UPDATEs (each UPDATE goes through the same connection).
+		$iaRows = [];
 		while ($o = $result->fetch_object()) {
-			if ( trim($o->title)=='' ) continue;
+			$iaRows[] = $o;
+		}
+		$this->freeResult($result);
+		foreach ($iaRows as $o) {
+			if (trim($o->title) == '') continue;
 			$hits = count($this->search_internet_archive_via_imdb($o->q));
-			if ( $hits==0 ) $hits = $this->search_internet_archive_via_title_and_year($o);
+			if ($hits == 0) $hits = $this->search_internet_archive_via_title_and_year($o);
 			$sql = "UPDATE `item_no_files` SET `ia_results`={$hits} WHERE `q`={$o->q}";
 			$this->tfc->getSQL($this->db, $sql);
 			sleep(2);
@@ -1539,6 +1584,7 @@ class WikiStream
 				urlencode($query);
 			$rowByQ[(int) $o->q] = $o;
 		}
+		$this->freeResult($result);
 		if (!empty($urlByQ)) {
 			$responses = $this->httpClient->getJsonBatch($urlByQ);
 			foreach ($urlByQ as $q => $_url) {
@@ -1562,6 +1608,7 @@ class WikiStream
 		while ($o = $result->fetch_object()) {
 			$ret[] = $o;
 		}
+		$this->freeResult($result);
 		return $ret;
 	}
 
@@ -1573,6 +1620,7 @@ class WikiStream
 		if ($o = $result->fetch_object()) {
 			$ret = (int) $o->total;
 		}
+		$this->freeResult($result);
 		return $ret;
 	}
 
@@ -1605,10 +1653,12 @@ class WikiStream
 		$q *= 1;
 		$sql = "SELECT `id` FROM `user_item_list` WHERE `user_id`={$user_id} AND `q`={$q}";
 		$result = $this->tfc->getSQL($this->db, $sql);
+		$found = false;
 		if ($o = $result->fetch_object()) {
-			return true;
+			$found = true;
 		}
-		return false;
+		$this->freeResult($result);
+		return $found;
 	}
 
 	public function clear_bad_genres(): void
@@ -1630,6 +1680,7 @@ class WikiStream
 		while ($o = $result->fetch_object()) {
 			$qs[] = $o->item_q;
 		}
+		$this->freeResult($result);
 		if (count($qs) == 0) {
 			return;
 		}
@@ -1673,10 +1724,12 @@ class WikiStream
 		$key_safe = $this->db->real_escape_string($key);
 		$sql = "SELECT `item_q` FROM `file` WHERE `property`={$prop_safe} AND `key`='{$key_safe}' LIMIT 1";
 		$result = $this->tfc->getSQL($this->db, $sql);
+		$item_q = 0;
 		if ($o = $result->fetch_object()) {
-			return $o->item_q;
+			$item_q = (int) $o->item_q;
 		}
-		return 0;
+		$this->freeResult($result);
+		return $item_q;
 	}
 
 	public function logEvent($event, $q = null): void
