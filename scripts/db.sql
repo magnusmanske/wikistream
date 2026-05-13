@@ -56,6 +56,13 @@ CREATE TABLE `section` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `audio_q` (`item_q`,`property`,`section_q`),
   KEY `section` (`section_q`),
+  -- Used by vw_section_property_q's GROUP BY (property, section_q) and by
+  -- update_persons / clear_bad_genres / get_top_sections / search_sections
+  -- which all filter by `property` first. Without this, those queries fall
+  -- back to filesort over the table.
+  -- Production deploy: ALTER TABLE `section` ADD INDEX `property_section`
+  -- (`property`, `section_q`);
+  KEY `property_section` (`property`,`section_q`),
   CONSTRAINT `section_ibfk_1` FOREIGN KEY (`item_q`) REFERENCES `item` (`q`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
