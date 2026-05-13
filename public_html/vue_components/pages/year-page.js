@@ -61,7 +61,8 @@ export default {
                         </div>
                         <div style="flex-grow: 1;"></div>
                     </div>
-                    <div v-if="!loading && entries.length>0">
+                    <skeleton-row v-if="loading" :count="12"></skeleton-row>
+                    <div v-else-if="entries.length>0">
                         <h3>{{year}}</h3>
                         <section-row :entries="entries" multi_row="1"></section-row>
                     </div>

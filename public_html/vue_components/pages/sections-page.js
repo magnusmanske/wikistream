@@ -31,8 +31,12 @@ export default {
         <div class="container-fluid">
             <page-header></page-header>
             <div class="row" style="width:100%;">
-                <div v-if="loading">
-                    <i tt="loading"></i>
+                <div v-if="loading" style="width: 100%;display: flex;">
+                    <div style="flex-grow: 1;"></div>
+                    <div style="width: 50%;">
+                        <skeleton-table :rows="10" :cols="2"></skeleton-table>
+                    </div>
+                    <div style="flex-grow: 1;"></div>
                 </div>
                 <div v-else style="width: 100%;display: flex;">
                     <div style="flex-grow: 1;"></div>

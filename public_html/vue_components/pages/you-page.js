@@ -37,7 +37,8 @@ export default {
                 <div>
                     <h1>{{user_name}}</h1>
                 </div>
-                <div v-if="!loading">
+                <skeleton-row v-if="loading" :count="12"></skeleton-row>
+                <div v-else>
                     <h2 tt="your_list"></h2>
                     <section-row :entries="entries" multi_row="1"></section-row>
                 </div>

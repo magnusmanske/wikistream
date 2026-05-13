@@ -305,3 +305,38 @@ div.person-description {
     color: rgba(255, 255, 255, 0.7);
     font-size: 0.9rem;
 }
+
+/* ── <skeleton-row> / <skeleton-table> placeholders ─────────────── */
+.skeleton-thumb,
+.skeleton-text {
+    background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.04) 0%,
+        rgba(255, 255, 255, 0.12) 50%,
+        rgba(255, 255, 255, 0.04) 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s ease-in-out infinite;
+    border-radius: 4px;
+}
+.skeleton-thumb {
+    width: 200px;
+    aspect-ratio: 4/3;
+    height: auto;
+    border-radius: 20px;
+    flex-shrink: 0;
+    margin-bottom: 1rem;
+}
+.skeleton-text {
+    height: 1rem;
+}
+@keyframes skeleton-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .skeleton-thumb,
+    .skeleton-text {
+        animation: none;
+    }
+}

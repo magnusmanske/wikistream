@@ -50,9 +50,7 @@ export default {
         <div class="container-fluid">
             <page-header></page-header>
             <div class="row" style="width:100%;">
-                <div v-if="loading">
-                    <i tt="loading"></i>
-                </div>
+                <skeleton-row v-if="loading" :count="12"></skeleton-row>
                 <div v-else>
                     <div style="display:flex;margin-bottom: 1rem;">
                         <div style="width:280px; text-align: center;">

@@ -193,8 +193,17 @@ export default {
         <div class="container-fluid">
             <page-header></page-header>
             <div class="row" style="width: 100%">
-                <div v-if="loading">
-                    <i tt="loading"></i>
+                <div v-if="loading" style="width: 100%">
+                    <div style="display: flex; margin-bottom: 1rem;">
+                        <div class="skeleton-thumb" style="width: 260px; aspect-ratio: 26/40; height: auto; border-radius: 0;"></div>
+                        <div style="flex-grow: 1; margin-left: 1rem; display: flex; flex-direction: column; gap: 0.5rem;">
+                            <div class="skeleton-text" style="width: 40%; height: 2rem;"></div>
+                            <div class="skeleton-text" style="width: 70%;"></div>
+                            <div class="skeleton-text" style="width: 30%;"></div>
+                            <div class="skeleton-text" style="width: 50%;"></div>
+                        </div>
+                    </div>
+                    <skeleton-row :count="8"></skeleton-row>
                 </div>
                 <div v-else-if="item==null||entry==null">
                     <i tt="item_not_in_wikiflix"></i>

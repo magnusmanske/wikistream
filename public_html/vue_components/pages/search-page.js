@@ -77,7 +77,7 @@ export default {
                         <div style="flex-grow: 1;"></div>
                     </div>
 
-                    <div v-if="loading"><i tt="loading"></i></div>
+                    <skeleton-row v-if="loading" :count="12"></skeleton-row>
                     <div v-else-if="query==''"></div>
                     <div v-else-if="entries.length+sections.length+people.length==0">
                         <i tt="no_search_results"></i>
