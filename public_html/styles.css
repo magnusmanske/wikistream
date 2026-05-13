@@ -19,6 +19,28 @@ div.page-header:hover .page-header-movies-total {
     visibility: visible;
 }
 
+/* Persistent search bar: always shown on tablets+ (Bootstrap sm breakpoint
+   and up), collapsed behind the 🔍 toggle on phones. */
+.page-header-search {
+    display: flex;
+    align-items: center;
+    margin-left: 0.5rem;
+}
+.page-header-search-toggle {
+    display: none;
+}
+@media (max-width: 575.98px) {
+    .page-header-search {
+        display: none;
+    }
+    .page-header-search.is-visible {
+        display: flex;
+    }
+    .page-header-search-toggle {
+        display: inline-block;
+    }
+}
+
 /* ── entry-thumb ─────────────────────────────────────────────────── */
 .entry-container {
     width: initial !important;

@@ -27,14 +27,18 @@ export default {
         const section_total = cfg.section_total ?? 0;
         const help_page = cfg.misc?.help_page ?? '#';
 
+        // Mobile-only — toggles visibility of the form that is always
+        // shown on wider viewports via CSS media queries.
         function toggle_search_bar(event) {
             const header = event.currentTarget.closest('.page-header');
             if (!header) return;
-            const form = header.querySelector('form');
+            const form = header.querySelector('.page-header-search');
             if (!form) return;
-            form.style.display = form.style.display === 'none' || form.style.display === '' ? 'block' : 'none';
-            const first = form.querySelector('input');
-            if (first) first.focus();
+            form.classList.toggle('is-visible');
+            if (form.classList.contains('is-visible')) {
+                const first = form.querySelector('input');
+                if (first) first.focus();
+            }
         }
 
         return { search_query, entry_total, person_total, section_total, help_page, toggle_search_bar };
@@ -70,14 +74,14 @@ export default {
                 <router-link to="/candidates" tt="add_more"></router-link>!
             </div>
             <div style="flex-grow: 1;"></div>
-            <form style="display: none;" @submit.prevent="do_search">
+            <form class="page-header-search" @submit.prevent="do_search">
                 <input class="form-control" style="display: inline; vertical-align: baseline; width: 15rem;" type="text" v-model="search_query" tt_title="enter_to_search" />
                 <input type="submit" style="display: none;" />
             </form>
             <a href="#" @click.prevent="random_entry" tt_title="random_entry" style="font-size: 22pt; margin-left: 0.5rem; color: white; text-decoration: none;">
                 <i class="bi bi-shuffle"></i>
             </a>
-            <a href="#" @click.prevent="toggle_search_bar" style="font-size: 24pt; margin-left: 0.5rem;">
+            <a href="#" class="page-header-search-toggle" @click.prevent="toggle_search_bar" style="font-size: 24pt; margin-left: 0.5rem;">
                 🔍
             </a>
             <widar>
