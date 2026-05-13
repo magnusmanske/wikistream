@@ -9,9 +9,10 @@
  * same `setup()` signature, same lifecycle hook names).
  */
 
-import { ttMixin } from '../../resources/vue_es6/state.js';
+import { state, ttMixin } from '../../resources/vue_es6/state.js';
+import { loadFavorites } from '../composables/useFavorites.js';
 
-const { ref } = Vue;
+const { ref, watch } = Vue;
 
 export default {
     name: 'PageHeader',
@@ -40,6 +41,14 @@ export default {
                 if (first) first.focus();
             }
         }
+
+        // Once widar reports the user as logged in, fetch their favourites
+        // so <entry-thumb> hearts render correctly across the app.
+        watch(
+            () => state.widar && state.widar.userinfo && state.widar.userinfo.name,
+            (name) => { if (name) loadFavorites(); },
+            { immediate: true },
+        );
 
         return { search_query, entry_total, person_total, section_total, help_page, toggle_search_bar };
     },

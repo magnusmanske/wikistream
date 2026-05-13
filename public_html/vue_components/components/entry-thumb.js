@@ -4,14 +4,34 @@
  * Renders the item's image (or the first Commons video frame, or a missing-
  * image placeholder) above a label with title + year + minutes + silent-movie
  * icon. Whole tile links to /entry/<q>.
+ *
+ * When the user is logged in (via <widar>), a heart-shaped overlay button
+ * lets them toggle the favourite state without leaving the listing.
  */
 
-import { ttMixin } from '../../resources/vue_es6/state.js';
+import { state, ttMixin } from '../../resources/vue_es6/state.js';
+import { useFavorites } from '../composables/useFavorites.js';
+
+const { computed } = Vue;
 
 export default {
     name: 'EntryThumb',
     mixins: [ttMixin],
     props: ['entry'],
+    setup(props) {
+        const { isFavorite, toggleFavorite } = useFavorites();
+
+        const logged_in = computed(
+            () => !!(state.widar && state.widar.userinfo && state.widar.userinfo.name),
+        );
+        const is_fav = computed(() => isFavorite(props.entry && props.entry.q));
+
+        function onHeartClick() {
+            if (props.entry && props.entry.q) toggleFavorite(props.entry.q);
+        }
+
+        return { logged_in, is_fav, onHeartClick };
+    },
     methods: {
         missing_icon() {
             return window.config?.misc?.missing_icon || '';
@@ -32,6 +52,18 @@ export default {
                     <commons-thumbnail v-else-if="first_commons_video()!=''" loading="lazy" :filename="first_commons_video()" videothumbnail="1" width="200" nolink="1"></commons-thumbnail>
                     <commons-thumbnail v-else :filename="missing_icon()" loading="lazy" width="200" nolink="1"></commons-thumbnail>
                 </router-link>
+                <button
+                    v-if="logged_in"
+                    type="button"
+                    class="entry-thumb-fav"
+                    :class="{ 'is-favorite': is_fav }"
+                    @click.stop.prevent="onHeartClick"
+                    :tt_title="is_fav ? 'remove_from_favourites' : 'add_to_favourites'"
+                    :aria-label="is_fav ? 'Remove from favourites' : 'Add to favourites'"
+                >
+                    <i v-if="is_fav" class="bi bi-heart-fill"></i>
+                    <i v-else class="bi bi-heart"></i>
+                </button>
                 <div class="legend">
                     {{entry.title}}
                     <div>

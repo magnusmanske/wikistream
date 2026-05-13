@@ -57,6 +57,38 @@ div.page-header:hover .page-header-movies-total {
     display: flex;
     flex-direction: column;
     gap: .5rem;
+    position: relative;
+}
+
+.entry-thumb-fav {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 2;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .2s, background .2s;
+}
+.entry-container .thumbnail-container:hover .entry-thumb-fav,
+.entry-container .thumbnail-container:focus-within .entry-thumb-fav,
+.entry-thumb-fav.is-favorite {
+    opacity: 1;
+}
+.entry-thumb-fav:hover {
+    background: rgba(0, 0, 0, 0.85);
+}
+.entry-thumb-fav.is-favorite {
+    color: #ff4d6d;
 }
 .entry-container .thumbnail-container a {
     overflow: hidden;
