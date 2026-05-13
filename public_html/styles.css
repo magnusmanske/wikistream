@@ -241,3 +241,25 @@ div.person-description {
     margin-bottom: 1.5rem;
     opacity: 0.85;
 }
+
+/* ── dark-theme overrides for Bootstrap 4 tables ─────────────────── */
+/* Bootstrap 4 ships .table with color:#212529 and .table-striped with
+   rgba(0,0,0,.05) stripes — both unreadable on this app's black
+   background. Override so headers, cells, and stripes have contrast. */
+.table {
+    color: white;
+}
+.table thead th {
+    color: white;
+    border-bottom-color: rgba(255, 255, 255, 0.3);
+}
+.table th,
+.table td {
+    border-top-color: rgba(255, 255, 255, 0.15);
+}
+.table-striped tbody tr:nth-of-type(odd) {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+.table-striped tbody tr:nth-of-type(odd) td {
+    color: white;
+}
