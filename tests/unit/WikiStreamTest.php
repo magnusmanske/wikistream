@@ -853,6 +853,9 @@ final class WikiStreamTest extends TestCase
         };
     }
 
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
     public function test_annotate_pre_1900_public_domain_emits_correct_qs_shape(): void
     {
         $db = $this->makeFakeDb();
@@ -939,18 +942,18 @@ final class WikiStreamTest extends TestCase
         $http->method('getJson')->willReturnCallback(function (string $url) {
             $r = new \stdClass();
             $r->response = new \stdClass();
+            $r->response->docs = [];
             if (str_contains($url, 'feature_films')) {
                 $r->response->docs = [
                     (object) ['identifier' => 'ia-id-1', 'external-identifier' => 'urn:imdb:tt0001'],
                     (object) ['identifier' => 'ia-id-2', 'external-identifier' => 'urn:imdb:tt0002'],
                     (object) ['identifier' => 'ia-id-3', 'external-identifier' => 'urn:imdb:tt0003'], // unresolved
                 ];
-            } elseif (str_contains($url, 'silent_films')) {
+            }
+            if (str_contains($url, 'silent_films')) {
                 $r->response->docs = [
                     (object) ['identifier' => 'ia-id-1-dup', 'external-identifier' => 'urn:imdb:tt0001'], // dup IMDb
                 ];
-            } else {
-                $r->response->docs = [];
             }
             return $r;
         });
@@ -1072,7 +1075,7 @@ final class WikiStreamTest extends TestCase
         $tfc->expects($this->never())->method('getSPARQL_TSV');
 
         $http = $this->createMock(\HttpClientInterface::class);
-        $http->method('getJson')->willReturnCallback(function (string $_url) {
+        $http->method('getJson')->willReturnCallback(function () {
             $r = new \stdClass();
             $r->query = new \stdClass();
             $r->query->categorymembers = [];
@@ -1103,7 +1106,7 @@ final class WikiStreamTest extends TestCase
         $tfc->expects($this->never())->method('getSPARQL_TSV');
 
         $http = $this->createMock(\HttpClientInterface::class);
-        $http->method('getJson')->willReturnCallback(function (string $_url) {
+        $http->method('getJson')->willReturnCallback(function () {
             $r = new \stdClass();
             $r->response = new \stdClass();
             $r->response->docs = [];
