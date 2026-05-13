@@ -333,7 +333,13 @@ class WikiStream
 				if (isset($existing_qs[$q])) {
 					continue;
 				}
-				$q_numeric = preg_replace("|\D|", "", $q) * 1;
+				// Cast via (int) — on PHP 8.x, "" * 1 is a TypeError, and
+				// parseItemFromURL can return "" for a row with a malformed
+				// ?q binding. Skip such rows rather than inserting q=0.
+				$q_numeric = (int) preg_replace("|\D|", "", (string) $q);
+				if ($q_numeric <= 0) {
+					continue;
+				}
 				$new_qs[] = $q_numeric;
 				$found += 1;
 			}
@@ -1629,14 +1635,21 @@ class WikiStream
 			if (isset($existing_qs[$q])) {
 				continue;
 			}
-			$q_numeric = preg_replace("|\D|", "", $q) * 1;
+			// (int) cast — see update_from_sparql() above for context.
+			$q_numeric = (int) preg_replace("|\D|", "", (string) $q);
+			if ($q_numeric <= 0) {
+				continue;
+			}
 			$existing_qs[$q] = $q_numeric;
+			$year_safe       = $row->year     === "" ? "null" : (int) $row->year;
+			$duration_safe   = $row->duration === "" ? "null" : (int) $row->duration;
+			$sitelinks_safe  = (int) $row->sitelinks;
 			$i = [
-				$q_numeric, # Safe
-				'"' . $this->db->real_escape_string($row->qLabel) . '"', # Safe
-				$row->year == "" ? "null" : $row->year * 1, # Safe
-				$row->duration == "" ? "null" : $row->duration * 1, # Safe
-				$row->sitelinks * 1, # Safe
+				$q_numeric,
+				'"' . $this->db->real_escape_string($row->qLabel) . '"',
+				$year_safe,
+				$duration_safe,
+				$sitelinks_safe,
 			];
 			$to_insert[] = "(" . implode(",", $i) . ")";
 		}
