@@ -185,7 +185,7 @@ export default {
                                 </div>
                                 <div style="margin-left: 1rem">
                                     <a :href="item.getURL()" class="wikidata" target="_blank" rel="noopener">
-                                        <img border="0" src="https://upload.wikimedia.org/wikipedia/commons/thumb/e/e4/Wikidata-logo_S.svg/32px-Wikidata-logo_S.svg.png" />
+                                        <img border="0" src="https://upload.wikimedia.org/wikipedia/commons/thumb/e/e4/Wikidata-logo_S.svg/180px-Wikidata-logo_S.svg.png" width="32px" />
                                     </a>
                                 </div>
                             </div>
@@ -210,11 +210,11 @@ export default {
                                             ▶
                                             <span v-if="v.is_trailer" tt="play_trailer"></span>
                                             <span v-else tt="play"></span>
-                                            <img v-if="v.property==10" src="https://upload.wikimedia.org/wikipedia/commons/thumb/4/4a/Commons-logo.svg/24px-Commons-logo.svg.png" />
-                                            <img v-if="v.property==724" src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/51/Internet_Archive_Logo.svg/32px-Internet_Archive_Logo.svg.png" />
-                                            <img v-if="v.property==1651" src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/32px-YouTube_full-color_icon_%282017%29.svg.png" />
-                                            <img v-if="v.property==4015" src="https://upload.wikimedia.org/wikipedia/commons/thumb/f/f1/Vimeo_icon_block.png/32px-Vimeo_icon_block.png" />
-                                            <img v-if="v.property==11731" src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/aa/Dailymotion_Wordmark_(2020).svg/64px-Dailymotion_Wordmark_(2020).svg.png" />
+                                            <img v-if="v.property==10" src="https://upload.wikimedia.org/wikipedia/commons/thumb/4/4a/Commons-logo.svg/180px-Commons-logo.svg.png" width="24px" />
+                                            <img v-if="v.property==724" src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/51/Internet_Archive_Logo.svg/180px-Internet_Archive_Logo.svg.png" width="32px" />
+                                            <img v-if="v.property==1651" src="https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/180px-YouTube_full-color_icon_%282017%29.svg.png" width="32px" />
+                                            <img v-if="v.property==4015" src="https://upload.wikimedia.org/wikipedia/commons/thumb/f/f1/Vimeo_icon_block.png/180px-Vimeo_icon_block.png" width="32px" />
+                                            <img v-if="v.property==11731" src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/aa/Dailymotion_Wordmark_(2020).svg/180px-Dailymotion_Wordmark_(2020).svg.png" width="64px" />
                                         </router-link>
                                         <div v-if="v.minutes!=null" class="play_button_legend">
                                             [{{v.minutes}} min]

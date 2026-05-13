@@ -72,7 +72,7 @@ export default {
                 <template #loggedin>
                     <router-link to="/you">
                         <span style="font-size:26pt; color: green;" tt_title="logged_in">
-                            <img border="0" src="https://upload.wikimedia.org/wikipedia/commons/thumb/6/61/Emoji_u1f464.svg/32px-Emoji_u1f464.svg.png" />
+                            <img border="0" src="https://upload.wikimedia.org/wikipedia/commons/thumb/6/61/Emoji_u1f464.svg/180px-Emoji_u1f464.svg.png" width="32px" />
                         </span>
                     </router-link>
                 </template>
