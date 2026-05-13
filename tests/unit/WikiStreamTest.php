@@ -879,6 +879,9 @@ final class WikiStreamTest extends TestCase
         $this->assertStringContainsString("Q1002\tP6216\tQ19652\tP459\tQ47246828", $joined);
     }
 
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
     public function test_annotate_pre_1900_public_domain_caps_per_run(): void
     {
         $db = $this->makeFakeDb();
