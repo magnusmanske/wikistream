@@ -1409,12 +1409,23 @@ class WikiStream
 
 	public function reset_all(): void
 	{
-		$sql = "TRUNCATE `section`";
-		$this->tfc->getSQL($this->db, $sql);
-		$sql = "TRUNCATE `file`";
-		$this->tfc->getSQL($this->db, $sql);
-		$sql = "DELETE FROM `item`";
-		$this->tfc->getSQL($this->db, $sql);
+		// FK shape:
+		//   section.item_q REFERENCES item.q
+		//   file.item_q    REFERENCES item.q
+		// Truncating the children (no incoming FKs of their own) is always
+		// fine. For the parent `item`, some MariaDB versions reject TRUNCATE
+		// on a table that any FK references — even when those children are
+		// empty — so we briefly disable FK checks to use TRUNCATE here too
+		// (faster than DELETE and resets AUTO_INCREMENT). finally{} restores
+		// the session flag even if a query errors out.
+		$this->tfc->getSQL($this->db, "SET FOREIGN_KEY_CHECKS=0");
+		try {
+			$this->tfc->getSQL($this->db, "TRUNCATE `section`");
+			$this->tfc->getSQL($this->db, "TRUNCATE `file`");
+			$this->tfc->getSQL($this->db, "TRUNCATE `item`");
+		} finally {
+			$this->tfc->getSQL($this->db, "SET FOREIGN_KEY_CHECKS=1");
+		}
 	}
 
 	public function purge_items_without_files(): void
