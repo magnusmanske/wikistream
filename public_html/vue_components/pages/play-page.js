@@ -16,6 +16,13 @@
  * fullscreen button overlay as a manual fallback. "Open at source" link
  * for every embeddable provider.
  *
+ * Keyboard shortcuts (page-level, document keydown):
+ *   f          – toggle fullscreen
+ *   space      – play/pause (native <video> only)
+ *   m          – mute/unmute (native <video> only)
+ *   ← / →      – seek -10 s / +10 s (native <video> only)
+ * Iframe sources rely on their own internal keyboard handling.
+ *
  * Vue 2.7 Composition API.
  */
 
@@ -23,7 +30,9 @@ import { ttMixin } from '../../resources/vue_es6/state.js';
 import { useFullscreen } from '../composables/useFullscreen.js';
 import { useLog } from '../composables/useLog.js';
 
-const { ref, computed } = Vue;
+const { ref, computed, onMounted, onBeforeUnmount } = Vue;
+
+const SEEK_SECONDS = 10;
 
 export default {
     name: 'PlayPage',
@@ -99,6 +108,56 @@ export default {
             source_prop: props.source_prop,
             source_key: props.source_key,
         });
+
+        function onKeydown(e) {
+            // Don't intercept when the user is typing in an input.
+            const tag = e.target && e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
+            // Don't fight modifier-key combos the OS / browser owns.
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+            const v = video.value;
+            switch (e.key) {
+                case 'f':
+                case 'F':
+                    if (!playable.value) return;
+                    e.preventDefault();
+                    enterFullscreen();
+                    break;
+                case ' ':
+                    if (!v) return;
+                    e.preventDefault();
+                    if (v.paused) {
+                        const p = v.play();
+                        if (p && typeof p.catch === 'function') p.catch(() => {});
+                    } else {
+                        v.pause();
+                    }
+                    break;
+                case 'm':
+                case 'M':
+                    if (!v) return;
+                    e.preventDefault();
+                    v.muted = !v.muted;
+                    break;
+                case 'ArrowLeft':
+                    if (!v) return;
+                    e.preventDefault();
+                    v.currentTime = Math.max(0, v.currentTime - SEEK_SECONDS);
+                    break;
+                case 'ArrowRight':
+                    if (!v) return;
+                    e.preventDefault();
+                    v.currentTime = Math.min(
+                        Number.isFinite(v.duration) ? v.duration : Infinity,
+                        v.currentTime + SEEK_SECONDS,
+                    );
+                    break;
+            }
+        }
+
+        onMounted(() => document.addEventListener('keydown', onKeydown));
+        onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown));
 
         return {
             stage,
