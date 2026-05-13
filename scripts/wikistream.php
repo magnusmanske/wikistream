@@ -795,10 +795,10 @@ class WikiStream
 		return $cnt;
 	}
 
-	protected function fix_item_image(&$o): object
+	protected function fix_item_image(&$o): void
 	{
 		if (!isset($o->files)) {
-			return $o;
+			return;
 		}
 		$o->files = json_decode($o->files);
 		foreach ($o->files as $vf) {
@@ -806,7 +806,6 @@ class WikiStream
 				$o->image = $vf->{'10'};
 			}
 		}
-		return $o;
 	}
 
 	protected function update_item_labels($item): void

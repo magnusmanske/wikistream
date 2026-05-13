@@ -11,7 +11,7 @@ use ReflectionMethod;
  * Tests for WikiStream::fix_item_image().
  *
  * The method is protected, so we call it via ReflectionMethod.
- * It mutates the passed object in place and also returns it.
+ * It mutates the passed object in place (returns void).
  */
 final class FixItemImageTest extends TestCase
 {
@@ -31,23 +31,22 @@ final class FixItemImageTest extends TestCase
         $this->method = new ReflectionMethod(\WikiStream::class, 'fix_item_image');
     }
 
-    private function invoke(object &$o): object
+    private function invoke(object &$o): void
     {
         $args = [&$o];
-        return $this->method->invokeArgs($this->ws, $args);
+        $this->method->invokeArgs($this->ws, $args);
     }
 
     // -----------------------------------------------------------------------
-    // When $o has no `files` property the object is returned unchanged.
+    // When $o has no `files` property the object is left unchanged.
     // -----------------------------------------------------------------------
 
-    public function test_no_files_property_returns_object_unchanged(): void
+    public function test_no_files_property_leaves_object_unchanged(): void
     {
         $o = (object) ['title' => 'Some Film', 'image' => null];
 
-        $result = $this->invoke($o);
+        $this->invoke($o);
 
-        $this->assertSame($o, $result);
         $this->assertNull($o->image);
         $this->assertFalse(isset($o->files));
     }
@@ -166,15 +165,18 @@ final class FixItemImageTest extends TestCase
     }
 
     // -----------------------------------------------------------------------
-    // The method returns the same object it received (allows chaining).
+    // Mutation is in-place: the caller's reference reflects the changes
+    // (this is the contract that replaced the prior mutate-and-return form).
     // -----------------------------------------------------------------------
 
-    public function test_returns_same_object_reference(): void
+    public function test_mutates_in_place(): void
     {
         $o = (object) ['image' => null, 'files' => '[]'];
+        $originalId = spl_object_id($o);
 
-        $result = $this->invoke($o);
+        $this->invoke($o);
 
-        $this->assertSame($o, $result);
+        $this->assertSame($originalId, spl_object_id($o));
+        $this->assertIsArray($o->files);
     }
 }
