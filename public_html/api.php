@@ -32,6 +32,8 @@ if ( $action=='get_entry' ) {
 	} catch (Exception $e) {
 		$out['data']->on_user_item_list = false;
 	}
+} else if ( $action=='get_random_entry' ) {
+	$out['data'] = [ 'q' => $ws->getRandomEntryQ() ];
 } else if ( $action=='get_all_sections' ) {
 	$out['data'] = $ws->get_top_sections(PHP_INT_MAX);
 } else if ( $action=='get_your_list' ) {

@@ -78,6 +78,16 @@ class WikiStream
 		return $people;
 	}
 
+	public function getRandomEntryQ(): ?int
+	{
+		$sql = "SELECT `q` FROM `vw_ranked_entries` ORDER BY RAND() LIMIT 1";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		if ($o = $result->fetch_object()) {
+			return (int) $o->q;
+		}
+		return null;
+	}
+
 	public function getEntry($q): ?object
 	{
 		$ret = (object) [];

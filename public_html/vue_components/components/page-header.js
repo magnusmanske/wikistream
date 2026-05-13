@@ -46,6 +46,15 @@ export default {
         do_search() {
             this.$router.push('/search/' + this.search_query);
         },
+        async random_entry() {
+            try {
+                const res = await fetch('./api.php?action=get_random_entry');
+                if (!res.ok) return;
+                const j = await res.json();
+                const q = j && j.data && j.data.q;
+                if (q) this.$router.push('/entry/' + q);
+            } catch (_) { /* silent — best-effort discovery */ }
+        },
     },
     template: `
         <div class="row page-header">
@@ -65,6 +74,9 @@ export default {
                 <input class="form-control" style="display: inline; vertical-align: baseline; width: 15rem;" type="text" v-model="search_query" tt_title="enter_to_search" />
                 <input type="submit" style="display: none;" />
             </form>
+            <a href="#" @click.prevent="random_entry" tt_title="random_entry" style="font-size: 22pt; margin-left: 0.5rem; color: white; text-decoration: none;">
+                <i class="bi bi-shuffle"></i>
+            </a>
             <a href="#" @click.prevent="toggle_search_bar" style="font-size: 24pt; margin-left: 0.5rem;">
                 🔍
             </a>
