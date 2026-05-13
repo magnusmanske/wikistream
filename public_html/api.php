@@ -95,6 +95,22 @@ if ( $action=='get_entry' ) {
 	$out['status'] = "Bad action: {$action}";
 }
 
+# Cache-Control: tag read-only public endpoints as cacheable for 5 minutes.
+# - get_entry includes per-user `on_user_item_list`, so use `private` so
+#   only the user's own browser caches it (not shared CDN caches).
+# - State-changing / per-user-write / randomised / log endpoints are never
+#   cached.
+$public_cacheable  = [ 'get_all_sections', 'get_section', 'get_person',
+                       'get_items_by_year', 'get_candidate_items', 'search' ];
+$private_cacheable = [ 'get_entry' ];
+if ( in_array($action, $public_cacheable,  true) ) {
+	header('Cache-Control: public, max-age=300');
+} else if ( in_array($action, $private_cacheable, true) ) {
+	header('Cache-Control: private, max-age=300');
+} else {
+	header('Cache-Control: no-store');
+}
+
 header('Content-Type: application/json');
 print json_encode ( $out ) ;
 ?>
