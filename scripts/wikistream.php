@@ -188,18 +188,14 @@ class WikiStream
 		}
 		$wil = new WikidataItemList();
 		$wil->loadItems($to_load);
-
-		$ret->sections = [];
-		foreach ($sections as $section) {
-			$item = $wil->getItem($section->section_q);
-			if (!isset($item)) {
-				continue;
-			}
-			$s = $this->populate_section($section, $item);
-			if (isset($s) and $s != null) {
-				$ret->sections[] = $s;
+		$itemsByQ = [];
+		foreach ($to_load as $q) {
+			$it = $wil->getItem($q);
+			if ($it !== null) {
+				$itemsByQ[(int) $q] = $it;
 			}
 		}
+		$ret->sections = $this->populate_sections_batch($sections, $itemsByQ);
 
 		return $ret;
 	}
@@ -1051,12 +1047,15 @@ class WikiStream
 		}
 		$wil = new WikidataItemList();
 		$wil->loadItems($qs);
-		foreach ($sections as $section) {
-			$item = $wil->getItem($section->section_q);
-			if (!isset($item)) {
-				continue;
+		$itemsByQ = [];
+		foreach ($qs as $q) {
+			$it = $wil->getItem($q);
+			if ($it !== null) {
+				$itemsByQ[(int) $q] = $it;
 			}
-			$out["sections"][] = $this->populate_section($section, $item);
+		}
+		foreach ($this->populate_sections_batch($sections, $itemsByQ, $max_movies_per_section) as $populated) {
+			$out["sections"][] = $populated;
 		}
 
 		// One round-trip for the top-level totals instead of three.
@@ -1091,6 +1090,82 @@ class WikiStream
 		];
 	}
 
+	/**
+	 * Batched analogue of populate_section() for many sections at once.
+	 *
+	 * Replaces the N+1 pattern (one COUNT query and one ranked-entries query
+	 * per section) with two batched queries total: one aggregate count, one
+	 * windowed top-N. The big win is in generate_all_data, which iterates
+	 * over potentially thousands of sections; for the common 20-section main
+	 * page the overhead is negligible.
+	 *
+	 * @param array $sections list of section row-objects with section_q + property
+	 * @param array $itemsByQ map of section_q (int) → WikidataItem (for the title)
+	 * @return array list of populated section blocks (skipping sections whose item is missing)
+	 */
+	protected function populate_sections_batch(array $sections, array $itemsByQ, int $max = 25): array
+	{
+		if (empty($sections)) {
+			return [];
+		}
+		$sectionQs = [];
+		foreach ($sections as $s) {
+			$sectionQs[] = (int) $s->section_q;
+		}
+		$sectionQs = array_values(array_unique($sectionQs));
+		$qList = implode(",", $sectionQs);
+
+		// Batched totals: one GROUP BY across all section_qs.
+		$totals = [];
+		$sql = "SELECT s.`section_q`, COUNT(DISTINCT v.`q`) AS `cnt`
+			FROM `section` s
+			JOIN `vw_ranked_entries_blacklist` v ON v.`q` = s.`item_q`
+			WHERE s.`section_q` IN ({$qList})
+			GROUP BY s.`section_q`";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		while ($o = $result->fetch_object()) {
+			$totals[(int) $o->section_q] = (int) $o->cnt;
+		}
+		$this->freeResult($result);
+
+		// Batched top-N entries per section via ROW_NUMBER() window function.
+		// Same ordering as vw_ranked_entries (sites DESC, minutes DESC, q).
+		$entriesBySection = [];
+		$max_safe = max(1, (int) $max);
+		$sql = "SELECT * FROM (
+			SELECT v.*, s.`section_q` AS `_bucket`,
+				ROW_NUMBER() OVER (PARTITION BY s.`section_q` ORDER BY v.`sites` DESC, v.`minutes` DESC, v.`q`) AS `_rn`
+			FROM `vw_ranked_entries_blacklist` v
+			JOIN `section` s ON s.`item_q` = v.`q`
+			WHERE s.`section_q` IN ({$qList})
+		) ranked WHERE `_rn` <= {$max_safe}";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		while ($o = $result->fetch_object()) {
+			$bucket = (int) $o->_bucket;
+			// Strip the helper columns so the row shape matches get_ranked_items().
+			unset($o->_bucket, $o->_rn);
+			$this->fix_item_image($o);
+			$entriesBySection[$bucket][] = $o;
+		}
+		$this->freeResult($result);
+
+		$out = [];
+		foreach ($sections as $section) {
+			$sq = (int) $section->section_q;
+			if (!isset($itemsByQ[$sq])) {
+				continue;
+			}
+			$out[] = [
+				"q" => $section->section_q,
+				"title" => $itemsByQ[$sq]->getLabel(),
+				"prop" => $section->property,
+				"total" => $totals[$sq] ?? 0,
+				"entries" => $entriesBySection[$sq] ?? [],
+			];
+		}
+		return $out;
+	}
+
 	public function search_sections($query): array
 	{
 		$ret = [];
@@ -1116,15 +1191,14 @@ class WikiStream
 		}
 		$wil = new WikidataItemList();
 		$wil->loadItems($qs);
-		foreach ($sections as $section) {
-			$item = $wil->getItem($section->section_q);
-			if (!isset($item)) {
-				continue;
+		$itemsByQ = [];
+		foreach ($qs as $q) {
+			$it = $wil->getItem($q);
+			if ($it !== null) {
+				$itemsByQ[(int) $q] = $it;
 			}
-			$ret[] = $this->populate_section($section, $item);
 		}
-
-		return $ret;
+		return $this->populate_sections_batch($sections, $itemsByQ);
 	}
 
 	public function search_entries($query): array
