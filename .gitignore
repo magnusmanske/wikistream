@@ -3,5 +3,6 @@
 .phpunit.result.cache
 public_html/php
 public_html/resources
+public_html/config.js
 .claude
 audits/
