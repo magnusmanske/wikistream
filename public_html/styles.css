@@ -1,0 +1,241 @@
+/* wikistream-specific styles for the Vue 2.7 + Composition API build. */
+
+/* ── page-header ─────────────────────────────────────────────────── */
+div.page-header {
+    display: flex;
+    align-items: baseline;
+    height: 3rem;
+}
+div.page-header a:hover {
+    text-decoration: none;
+}
+.page-header-movies-total {
+    visibility: hidden;
+    font-size: 9pt;
+    color: #AAA;
+    margin-left: 1rem;
+}
+div.page-header:hover .page-header-movies-total {
+    visibility: visible;
+}
+
+/* ── entry-thumb ─────────────────────────────────────────────────── */
+.entry-container {
+    width: initial !important;
+    height: initial !important;
+    max-width: initial !important;
+    min-width: initial !important;
+    margin-right: initial !important;
+}
+.entry-container .thumbnail-container:hover {
+    opacity: 1 !important;
+}
+.entry-container .thumbnail-container {
+    height: initial !important;
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+}
+.entry-container .thumbnail-container a {
+    overflow: hidden;
+    width: 200px;
+    aspect-ratio: 4/3;
+    height: auto;
+    border-radius: 20px;
+}
+.entry-container .thumbnail-container .wiki_thumbnail {
+    object-fit: cover;
+    transition: transform .75s, filter .5s;
+    height: 100%;
+    width: 100%;
+}
+.entry-container .thumbnail-container a:hover .wiki_thumbnail,
+.entry-container .thumbnail-container a:focus-visible .wiki_thumbnail {
+    transform: scale(1.05);
+    filter: brightness(1.2);
+}
+.entry-container .thumbnail-container .legend {
+    position: initial;
+    left: initial;
+    right: initial;
+    bottom: initial;
+    background-color: initial;
+    opacity: .6;
+    color: white;
+    transition: opacity .25s;
+    width: 200px;
+}
+.entry-container .thumbnail-container .legend div {
+    opacity: .6;
+}
+.entry-container .thumbnail-container:hover .legend {
+    opacity: .6 !important;
+}
+.entry-container .thumbnail-container a:hover + .legend,
+.entry-container .thumbnail-container a:focus-visible + .legend {
+    opacity: 1 !important;
+}
+
+/* ── person-thumb ────────────────────────────────────────────────── */
+div.person-box {
+    width: 260px;
+    max-width: 260px;
+    height: 360px;
+    border: 1px solid #DDD;
+    margin: 0.2rem;
+    padding: 0.1rem;
+    text-align: center;
+}
+div.person-picture {
+    width: 260px;
+    max-width: 260px;
+    height: 300px;
+    margin-bottom: 0.2rem;
+}
+div.person-picture:hover {
+    opacity: 0.5;
+}
+div.person-box a {
+    text-decoration: none;
+    color: white;
+}
+
+/* ── section-row ─────────────────────────────────────────────────── */
+div.section {
+    margin-bottom: 1rem;
+    margin-left: 100px;
+    margin-right: 100px;
+}
+span.section-total-plain {
+    color: #AAA;
+    font-size: 9pt;
+}
+span.section-total {
+    visibility: hidden;
+    color: #AAA;
+    font-size: 9pt;
+}
+div.section h3:hover span.section-total {
+    visibility: visible;
+}
+div.section h3 a {
+    color: white;
+}
+div.section h3 a:hover {
+    text-decoration: none;
+    color: white;
+}
+div.section-single-row {
+    display: flex;
+    overflow-x: auto;
+    gap: 15px;
+    margin-left: -100px;
+    margin-right: -100px;
+    padding-left: 100px;
+    padding-right: 100px;
+    mask-image: linear-gradient(to right, transparent 50px, black 100px), linear-gradient(to left, transparent 50px, black 100px);
+    mask-composite: intersect;
+    padding-bottom: 25px;
+}
+div.section-multi-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+div.section-multi-row div.entry-container {
+    margin-bottom: 1rem;
+}
+
+/* ── entry-page ──────────────────────────────────────────────────── */
+div.entry-description {
+    margin: 0.5rem;
+}
+span.fluc span.wd-link-as-text {
+    display: inline-block;
+}
+span.fluc span.wd-link-as-text:first-letter {
+    text-transform: uppercase;
+}
+div.play_button_legend {
+    opacity: 0.6;
+    color: white;
+    text-align: center;
+}
+
+/* ── person-page ─────────────────────────────────────────────────── */
+div.person-description {
+    margin: 0.5rem;
+}
+
+/* ── play-page ───────────────────────────────────────────────────── */
+.play-stage {
+    position: fixed;
+    left: 5%;
+    right: 5%;
+    bottom: 5%;
+    top: 4rem;
+    background: black;
+}
+.play-stage:fullscreen,
+.play-stage:-webkit-full-screen {
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+}
+.play-stage iframe {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
+.play-fullscreen-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 10;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    padding: 0.25rem 0.6rem;
+    font-size: 1.25rem;
+    line-height: 1;
+    border-radius: 0.25rem;
+    cursor: pointer;
+}
+.play-fullscreen-btn:hover {
+    background: rgba(0, 0, 0, 0.85);
+}
+.play-source-link {
+    position: absolute;
+    bottom: 0.5rem;
+    right: 0.5rem;
+    z-index: 5;
+    background: rgba(0, 0, 0, 0.55);
+    color: white !important;
+    text-decoration: none;
+    padding: 0.25rem 0.6rem;
+    border-radius: 0.25rem;
+    font-size: 0.85rem;
+}
+.play-source-link:hover {
+    background: rgba(0, 0, 0, 0.85);
+    text-decoration: underline;
+}
+.play-external-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    text-align: center;
+    padding: 2rem;
+}
+.play-external-card h2 {
+    margin-bottom: 1rem;
+}
+.play-external-card p {
+    max-width: 36rem;
+    margin-bottom: 1.5rem;
+    opacity: 0.85;
+}
