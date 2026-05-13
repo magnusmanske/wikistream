@@ -627,17 +627,22 @@ class WikiStream
 
 	protected function beginTransaction(): void
 	{
-		$this->tfc->getSQL($this->db, "START TRANSACTION");
+		// ToolforgeCommon::getSQL takes $sql by reference, so we can't pass
+		// string literals here (or anywhere else in this file).
+		$sql = "START TRANSACTION";
+		$this->tfc->getSQL($this->db, $sql);
 	}
 
 	protected function commit(): void
 	{
-		$this->tfc->getSQL($this->db, "COMMIT");
+		$sql = "COMMIT";
+		$this->tfc->getSQL($this->db, $sql);
 	}
 
 	protected function rollback(): void
 	{
-		$this->tfc->getSQL($this->db, "ROLLBACK");
+		$sql = "ROLLBACK";
+		$this->tfc->getSQL($this->db, $sql);
 	}
 
 	/**
@@ -672,7 +677,8 @@ class WikiStream
 	{
 		// 1. Read last check timestamp from kv.
 		$last_rc_check = "";
-		$result = $this->tfc->getSQL($this->db, "SELECT `value` FROM `kv` WHERE `key`='last_rc_check'");
+		$sql = "SELECT `value` FROM `kv` WHERE `key`='last_rc_check'";
+		$result = $this->tfc->getSQL($this->db, $sql);
 		if ($o = $result->fetch_object()) {
 			$last_rc_check = $o->value;
 		}
@@ -718,8 +724,10 @@ class WikiStream
 				// affect zero rows, which is fine.
 				foreach (array_chunk(array_keys($changedQs), 1000) as $chunk) {
 					$qList = implode(",", $chunk);
-					$this->tfc->getSQL($this->db, "UPDATE `item` SET `available`=0 WHERE `q` IN ({$qList})");
-					$this->tfc->getSQL($this->db, "DELETE FROM `person` WHERE `q` IN ({$qList})");
+					$sql = "UPDATE `item` SET `available`=0 WHERE `q` IN ({$qList})";
+					$this->tfc->getSQL($this->db, $sql);
+					$sql = "DELETE FROM `person` WHERE `q` IN ({$qList})";
+					$this->tfc->getSQL($this->db, $sql);
 				}
 			}
 
@@ -727,10 +735,8 @@ class WikiStream
 			// on first run (the prior UPDATE-only form silently did nothing
 			// until someone seeded the row manually).
 			$newest_safe = $this->db->real_escape_string($newestTs);
-			$this->tfc->getSQL(
-				$this->db,
-				"INSERT INTO `kv` (`key`,`value`) VALUES ('last_rc_check','{$newest_safe}') ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)"
-			);
+			$sql = "INSERT INTO `kv` (`key`,`value`) VALUES ('last_rc_check','{$newest_safe}') ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)";
+			$this->tfc->getSQL($this->db, $sql);
 			$this->commit();
 		} catch (\Throwable $e) {
 			$this->rollback();
@@ -866,7 +872,8 @@ class WikiStream
 		}
 
 		$qList = implode(",", array_values(array_unique($qNumerics)));
-		$this->tfc->getSQL($this->db, "DELETE FROM `label` WHERE `q` IN ({$qList})");
+		$sql = "DELETE FROM `label` WHERE `q` IN ({$qList})";
+		$this->tfc->getSQL($this->db, $sql);
 
 		if (empty($valueRows)) {
 			return;
@@ -1418,13 +1425,18 @@ class WikiStream
 		// empty — so we briefly disable FK checks to use TRUNCATE here too
 		// (faster than DELETE and resets AUTO_INCREMENT). finally{} restores
 		// the session flag even if a query errors out.
-		$this->tfc->getSQL($this->db, "SET FOREIGN_KEY_CHECKS=0");
+		$sql = "SET FOREIGN_KEY_CHECKS=0";
+		$this->tfc->getSQL($this->db, $sql);
 		try {
-			$this->tfc->getSQL($this->db, "TRUNCATE `section`");
-			$this->tfc->getSQL($this->db, "TRUNCATE `file`");
-			$this->tfc->getSQL($this->db, "TRUNCATE `item`");
+			$sql = "TRUNCATE `section`";
+			$this->tfc->getSQL($this->db, $sql);
+			$sql = "TRUNCATE `file`";
+			$this->tfc->getSQL($this->db, $sql);
+			$sql = "TRUNCATE `item`";
+			$this->tfc->getSQL($this->db, $sql);
 		} finally {
-			$this->tfc->getSQL($this->db, "SET FOREIGN_KEY_CHECKS=1");
+			$sql = "SET FOREIGN_KEY_CHECKS=1";
+			$this->tfc->getSQL($this->db, $sql);
 		}
 	}
 
