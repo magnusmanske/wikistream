@@ -658,60 +658,72 @@ class WikiStream
 
 	public function make_rc_unavailable(): void
 	{
+		// 1. Read last check timestamp from kv.
 		$last_rc_check = "";
-		$sql = "SELECT `value` FROM `kv` WHERE `key`='last_rc_check'";
-		$result = $this->tfc->getSQL($this->db, $sql);
-		while ($o = $result->fetch_object()) {
+		$result = $this->tfc->getSQL($this->db, "SELECT `value` FROM `kv` WHERE `key`='last_rc_check'");
+		if ($o = $result->fetch_object()) {
 			$last_rc_check = $o->value;
 		}
+		$this->freeResult($result);
 
-		$qs_item = [];
-		$sql = "SELECT `q` FROM `item`";
-		$result = $this->tfc->getSQL($this->db, $sql);
-		while ($o = $result->fetch_object()) {
-			$qs_item[] = $o->q;
+		// First-run safety: bound the lookback so we don't scan
+		// months of recentchanges history the first time through.
+		if ($last_rc_check === "") {
+			$last_rc_check = date("YmdHis", strtotime("-1 day"));
 		}
 
-		$qs_person = [];
-		$sql = "SELECT `q` FROM `person`";
-		$result = $this->tfc->getSQL($this->db, $sql);
-		while ($o = $result->fetch_object()) {
-			$qs_person[] = $o->q;
-		}
-
-		$all_qs = array_values(array_unique(array_merge($qs_item, $qs_person)));
-
+		// 2. Single scan of wikidatawiki.recentchanges for ns=0 changes
+		//    since last check. Replaces the previous chunked approach which
+		//    loaded every item.q + every person.q into PHP first and then
+		//    issued (count/1000) cross-DB queries with rc_title IN (...).
 		$dbwd = $this->tfc->openDBwiki("wikidatawiki");
-		$qs = [];
-		foreach (array_chunk($all_qs, 1000) as $chunk) {
-			$sql =
-				"SELECT `rc_title`,`rc_timestamp` FROM `recentchanges`
-				WHERE `rc_namespace`=0 AND `rc_timestamp`>'{$last_rc_check}'
-				AND `rc_title` IN ('Q" .
-				implode("','Q", $chunk) .
-				"')";
-			$result = $this->tfc->getSQL($dbwd, $sql);
-			while ($o = $result->fetch_object()) {
-				$qs[$o->rc_title] = preg_replace("|\D|", "", $o->rc_title) * 1;
-				if ($last_rc_check < $o->rc_timestamp) {
-					$last_rc_check = $o->rc_timestamp;
-				}
+		$last_rc_check_safe = $this->db->real_escape_string($last_rc_check);
+		$sql = "SELECT `rc_title`,`rc_timestamp` FROM `recentchanges` " .
+			"WHERE `rc_namespace`=0 AND `rc_timestamp`>'{$last_rc_check_safe}'";
+		$result = $this->tfc->getSQL($dbwd, $sql);
+		$changedQs = [];
+		$newestTs = $last_rc_check;
+		while ($o = $result->fetch_object()) {
+			$q = (int) preg_replace("|\D|", "", $o->rc_title);
+			if ($q > 0) {
+				$changedQs[$q] = true;
+			}
+			if ($newestTs < $o->rc_timestamp) {
+				$newestTs = $o->rc_timestamp;
 			}
 		}
+		$this->freeResult($result);
 
-		if (count($qs) > 0) {
-			$sql =
-				"UPDATE `item` SET `available`=0 WHERE `q` IN (" .
-				implode(",", $qs) .
-				")";
-			$this->tfc->getSQL($this->db, $sql);
-			$sql =
-				"DELETE FROM `person` WHERE `q` IN (" . implode(",", $qs) . ")";
-			$this->tfc->getSQL($this->db, $sql);
+		// 3. Apply the diff to our tool DB. Wrap the writes (and the
+		//    kv UPSERT) in a single transaction so a mid-run crash doesn't
+		//    leave us out of sync with kv.last_rc_check.
+		$this->beginTransaction();
+		try {
+			if (!empty($changedQs)) {
+				// Chunk the IN-clause so a flood of changes doesn't blow up
+				// query text length. WHERE q IN (...) uses the PK index on
+				// both tables — most changedQs aren't in our DB and
+				// affect zero rows, which is fine.
+				foreach (array_chunk(array_keys($changedQs), 1000) as $chunk) {
+					$qList = implode(",", $chunk);
+					$this->tfc->getSQL($this->db, "UPDATE `item` SET `available`=0 WHERE `q` IN ({$qList})");
+					$this->tfc->getSQL($this->db, "DELETE FROM `person` WHERE `q` IN ({$qList})");
+				}
+			}
+
+			// Persist the high-water mark. UPSERT so the kv row is created
+			// on first run (the prior UPDATE-only form silently did nothing
+			// until someone seeded the row manually).
+			$newest_safe = $this->db->real_escape_string($newestTs);
+			$this->tfc->getSQL(
+				$this->db,
+				"INSERT INTO `kv` (`key`,`value`) VALUES ('last_rc_check','{$newest_safe}') ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)"
+			);
+			$this->commit();
+		} catch (\Throwable $e) {
+			$this->rollback();
+			throw $e;
 		}
-
-		$sql = "UPDATE `kv` SET `value`='{$last_rc_check}' WHERE `key`='last_rc_check'";
-		$this->tfc->getSQL($this->db, $sql);
 	}
 
 	public function get_recently_added($num = 25, $section_q = null): array
