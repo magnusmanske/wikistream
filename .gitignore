@@ -1,3 +1,6 @@
 .DS_Store
 /vendor/
 .phpunit.result.cache
+public_html/php
+public_html/resources
+.claude

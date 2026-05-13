@@ -1,56 +1,115 @@
+<style>
+.play-stage {
+  position: fixed;
+  left: 5%;
+  right: 5%;
+  bottom: 5%;
+  top: 4rem;
+  background: black;
+}
+.play-stage:fullscreen,
+.play-stage:-webkit-full-screen {
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+}
+.play-stage iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.play-fullscreen-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  padding: 0.25rem 0.6rem;
+  font-size: 1.25rem;
+  line-height: 1;
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+.play-fullscreen-btn:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+.play-source-link {
+  position: absolute;
+  bottom: 0.5rem;
+  right: 0.5rem;
+  z-index: 5;
+  background: rgba(0, 0, 0, 0.55);
+  color: white !important;
+  text-decoration: none;
+  padding: 0.25rem 0.6rem;
+  border-radius: 0.25rem;
+  font-size: 0.85rem;
+}
+.play-source-link:hover {
+  background: rgba(0, 0, 0, 0.85);
+  text-decoration: underline;
+}
+.play-external-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  padding: 2rem;
+}
+.play-external-card h2 {
+  margin-bottom: 1rem;
+}
+.play-external-card p {
+  max-width: 36rem;
+  margin-bottom: 1.5rem;
+  opacity: 0.85;
+}
+</style>
+
 <template id="play-template">
   <div class="container-fluid">
-    <page-header></page-header>
-    <div style="position: fixed; left: 5%; right: 5%; bottom: 5%; top: 4rem">
+    <page-header v-if="!is_fullscreen"></page-header>
+    <div class="play-stage" ref="stage">
       <iframe
-        v-if="source_prop==10||source_prop==51"
-        :src="'https://commons.wikimedia.org/wiki/File:'+encodeURIComponent(source_key)+'?embedplayer=yes'"
-        width="100%"
-        height="100%"
+        v-if="embed_url"
+        :src="embed_url"
+        :allow="iframe_allow"
         frameborder="0"
-        allow="autoplay"
         webkitallowfullscreen="true"
         mozallowfullscreen="true"
         allowfullscreen
       ></iframe>
-      <iframe
-        v-else-if="source_prop==724"
-        :src="'https://archive.org/embed/'+encodeURIComponent(source_key)"
-        width="100%"
-        height="100%"
-        frameborder="0"
-        allow="autoplay"
-        webkitallowfullscreen="true"
-        mozallowfullscreen="true"
-        allowfullscreen
-      ></iframe>
-      <iframe
-        v-else-if="source_prop==1651"
-        :src="'https://www.youtube-nocookie.com/embed/'+encodeURIComponent(source_key)"
-        width="100%"
-        height="100%"
-        frameborder="0"
-        allow="autoplay; encrypted-media"
-        webkitallowfullscreen="true"
-        mozallowfullscreen="true"
-        allowfullscreen
-      ></iframe>
-      <iframe
-        v-else-if="source_prop==4015"
-        :src="'https://player.vimeo.com/video/'+encodeURIComponent(source_key)+'?autoplay=1&loop=1&autopause=0'"
-        width="100%"
-        height="100%"
-        frameborder="0"
-        allow="autoplay; fullscreen"
-        allowfullscreen
-      ></iframe>
-      <!-- TODO on-page player -->
-      <a
-        v-else-if="source_prop==11731"
-        :href="'https://www.dailymotion.com/video/'+encodeURIComponent(source_key)"
-        >View on DailyMotion</a
+
+      <div v-else class="play-external-card">
+        <p tt="unknown_source">Unknown source</p>
+      </div>
+
+      <button
+        v-if="embed_url && !is_fullscreen"
+        type="button"
+        class="play-fullscreen-btn"
+        @click="enterFullscreen"
+        tt_title="fullscreen"
+        aria-label="Fullscreen"
       >
-      <div v-else tt="unknown_source"></div>
+        &#9974;
+      </button>
+
+      <a
+        v-if="external_link"
+        :href="external_link"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="play-source-link"
+      >
+        <span tt="open_at_source">Open at source</span> &#8599;
+      </a>
     </div>
   </div>
 </template>
@@ -61,27 +120,134 @@
   let PlayPage = Vue.extend({
     props: ["source_prop", "source_key"],
     data: function () {
-      return {};
+      return { is_fullscreen: false };
+    },
+    computed: {
+      prop_id: function () {
+        return parseInt(this.source_prop, 10);
+      },
+      encoded_key: function () {
+        return encodeURIComponent(this.source_key);
+      },
+      embed_url: function () {
+        switch (this.prop_id) {
+          case 10:
+          case 51:
+            return (
+              "https://commons.wikimedia.org/wiki/File:" +
+              this.encoded_key +
+              "?embedplayer=yes"
+            );
+          case 724:
+            return (
+              "https://archive.org/embed/" +
+              this.encoded_key +
+              "?autoplay=1"
+            );
+          case 4015:
+            return (
+              "https://player.vimeo.com/video/" +
+              this.encoded_key +
+              "?autoplay=1&autopause=0"
+            );
+          case 11731:
+            return (
+              "https://www.dailymotion.com/embed/video/" +
+              this.encoded_key +
+              "?autoplay=1"
+            );
+          case 1651:
+            return (
+              "https://www.youtube-nocookie.com/embed/" +
+              this.encoded_key +
+              "?autoplay=1"
+            );
+        }
+        return null;
+      },
+      iframe_allow: function () {
+        return "autoplay; encrypted-media; fullscreen; picture-in-picture";
+      },
+      external_link: function () {
+        switch (this.prop_id) {
+          case 10:
+          case 51:
+            return (
+              "https://commons.wikimedia.org/wiki/File:" + this.encoded_key
+            );
+          case 724:
+            return "https://archive.org/details/" + this.encoded_key;
+          case 4015:
+            return "https://vimeo.com/" + this.encoded_key;
+          case 11731:
+            return "https://www.dailymotion.com/video/" + this.encoded_key;
+          case 1651:
+            return "https://www.youtube.com/watch?v=" + this.encoded_key;
+        }
+        return null;
+      },
     },
     created: function () {
       this.log("play_page_loaded");
     },
+    mounted: function () {
+      tt.updateInterface(this.$el);
+      this._fsHandler = this.onFullscreenChange.bind(this);
+      document.addEventListener("fullscreenchange", this._fsHandler);
+      document.addEventListener("webkitfullscreenchange", this._fsHandler);
+      this.$nextTick(this.enterFullscreen);
+    },
+    beforeDestroy: function () {
+      document.removeEventListener("fullscreenchange", this._fsHandler);
+      document.removeEventListener("webkitfullscreenchange", this._fsHandler);
+      if (this.is_fullscreen) {
+        const exit =
+          document.exitFullscreen || document.webkitExitFullscreen;
+        if (exit) {
+          const result = exit.call(document);
+          if (result && typeof result.catch === "function") {
+            result.catch(function () {});
+          }
+        }
+      }
+    },
     updated: function () {
       tt.updateInterface(this.$el);
     },
-    mounted: function () {
-      tt.updateInterface(this.$el);
-    },
     methods: {
+      enterFullscreen: function () {
+        const el = this.$refs.stage;
+        if (!el || !this.embed_url) return;
+        const req =
+          el.requestFullscreen ||
+          el.webkitRequestFullscreen ||
+          el.mozRequestFullScreen;
+        if (!req) return;
+        try {
+          const result = req.call(el);
+          if (result && typeof result.catch === "function") {
+            result.catch(function () {});
+          }
+        } catch (e) {
+          // Browser blocked fullscreen (no user gesture, iOS, etc.) — degrade silently.
+        }
+      },
+      onFullscreenChange: function () {
+        const fsEl =
+          document.fullscreenElement ||
+          document.webkitFullscreenElement ||
+          null;
+        this.is_fullscreen = fsEl === this.$refs.stage;
+      },
       log: function (event) {
         fetch(
           "./api.php?action=log&event=" +
-            event +
+            encodeURIComponent(event) +
             "&source_prop=" +
-            this.source_prop +
+            encodeURIComponent(this.source_prop) +
             "&source_key=" +
-            this.source_key,
-        ).then((results) => {});
+            encodeURIComponent(this.source_key),
+        ).catch(function () {});
       },
     },
     template: "#play-template",
