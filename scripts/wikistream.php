@@ -12,6 +12,13 @@ if (!class_exists('WikidataItem') || !class_exists('WikidataItemList')) {
 require_once __DIR__ . "/../scripts/config.php";
 require_once __DIR__ . "/../scripts/HttpClient.php";
 
+/**
+ * Thrown by WikiStream::add_item_details when the item carries a bad-genre
+ * claim. Distinct type so the chunk handler can catch only this case and
+ * let real failures propagate.
+ */
+class BadGenreException extends \RuntimeException {}
+
 class WikiStream
 {
 	// Wikidata item/property IDs used in PHP logic
@@ -402,7 +409,10 @@ class WikiStream
 			return;
 		}
 
-		# Sections
+		# Sections — collect into a per-item buffer first so a bad-genre
+		# claim discovered mid-loop doesn't leave partial rows in the
+		# caller's $sections array.
+		$itemSections = [];
 		foreach (
 			array_merge(
 				$this->config->misc_section_props,
@@ -418,13 +428,17 @@ class WikiStream
 					continue;
 				}
 				if (in_array($target_q_numeric, $this->config->bad_genres)) {
-					throw new Exception("Bad genre");
+					throw new BadGenreException("Bad genre for Q{$item_q_numeric}: target Q{$target_q_numeric}");
 				}
-				$sections[] = "({$item_q_numeric},{$prop},{$target_q_numeric})";
+				$itemSections[] = "({$item_q_numeric},{$prop},{$target_q_numeric})";
 			}
 		}
 
-		$qs[] = $item_q_numeric; # Only now, section filter might throw exception
+		// All section claims passed the bad-genre filter — commit them.
+		foreach ($itemSections as $row) {
+			$sections[] = $row;
+		}
+		$qs[] = $item_q_numeric;
 		# Files
 		foreach ($this->config->file_props as $property) {
 			foreach ($item->getClaims($property) as $c) {
@@ -548,8 +562,10 @@ class WikiStream
 					$items_for_labels,
 					$item_rows,
 				);
-			} catch (Exception $e) {
-				// print "Filtered out {$q_numeric} for bad genre\n";
+			} catch (BadGenreException $e) {
+				// Expected control flow: item carries a configured bad-genre
+				// claim, drop it from this chunk. Genuine errors no longer
+				// get swallowed here.
 			}
 		}
 		if (count($qs) == 0) {
