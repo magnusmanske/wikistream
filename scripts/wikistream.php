@@ -1181,26 +1181,24 @@ class WikiStream
 		if ($this->config->whitelist_page == "") {
 			return;
 		}
-		$qs = [];
-		$existing_item_qs = $this->get_items_in_db();
 		$wt = $this->tfc->getWikiPageText(
 			"wikidatawiki",
 			$this->config->whitelist_page,
 		);
-		$rows = explode("\n", $wt);
-		foreach ($rows as $row) {
+		$qs = [];
+		foreach (explode("\n", $wt) as $row) {
 			if (!preg_match("|^\*.*?(\d{3,})|", $row, $m)) {
 				continue;
 			}
-			$q = $m[1] * 1;
-			if (isset($existing_item_qs["Q" . $q])) {
-				continue;
-			}
-			$qs[] = $q;
+			$qs[] = (int) $m[1];
 		}
 		if (count($qs) == 0) {
 			return;
 		}
+		// Skip the prefetch: the whitelist page lists at most dozens of Qs,
+		// so building a hashmap of every `item` row to filter them is
+		// gratuitous. INSERT IGNORE silently no-ops on existing rows.
+		$qs = array_values(array_unique($qs));
 		$sql =
 			"INSERT IGNORE INTO `item` (`q`) VALUES (" .
 			implode("),(", $qs) .
