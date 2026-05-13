@@ -1230,4 +1230,309 @@ final class WikiStreamTest extends TestCase
 
         $this->assertCount(3, $entry_files, 'Exactly 3 clean files (one per non-opted-out claim) must be ingested.');
     }
+
+    // A4: WikiStream::parseP953Url() maps a wdt:P953 URL to a (file-prop,
+    // key) pair so the bot can add the corresponding native file-host
+    // property (P10/P724/P1651/P4015/P11731). Pure function, table-driven
+    // tests.
+    // ------------------------------------------------------------------
+
+    public static function provideP953UrlCases(): array
+    {
+        return [
+            ['https://archive.org/details/CharlieChaplin_TheGoldRush',          [724,  'CharlieChaplin_TheGoldRush']],
+            ['http://archive.org/details/some-id',                              [724,  'some-id']],
+            ['https://www.archive.org/details/another',                         [724,  'another']],
+            ['https://archive.org/embed/abc',                                   null],
+            ['https://www.youtube.com/watch?v=dQw4w9WgXcQ',                     [1651, 'dQw4w9WgXcQ']],
+            ['https://youtube.com/watch?v=abc123XYZ',                           [1651, 'abc123XYZ']],
+            ['https://m.youtube.com/watch?v=zzzz_-9999',                        [1651, 'zzzz_-9999']],
+            ['https://www.youtube.com/embed/dQw4w9WgXcQ',                       [1651, 'dQw4w9WgXcQ']],
+            ['https://youtu.be/dQw4w9WgXcQ',                                    [1651, 'dQw4w9WgXcQ']],
+            ['https://vimeo.com/12345678',                                      [4015, '12345678']],
+            ['https://player.vimeo.com/video/12345678',                         [4015, '12345678']],
+            ['https://vimeo.com/notnumeric',                                    null],
+            ['https://www.dailymotion.com/video/x7tgad0',                       [11731, 'x7tgad0']],
+            ['https://dailymotion.com/video/abcd',                              [11731, 'abcd']],
+            ['https://commons.wikimedia.org/wiki/File:Big_Buck_Bunny.webm',     [10,   'Big_Buck_Bunny.webm']],
+            ['https://commons.m.wikimedia.org/wiki/File:Sintel.webm',           [10,   'Sintel.webm']],
+            ['https://commons.wikimedia.org/wiki/File:Some%20Title.webm',       [10,   'Some Title.webm']],
+            ['',                                                                null],
+            ['not a url at all',                                                null],
+            ['https://example.com/random',                                      null],
+            ['https://twitter.com/some/post',                                   null],
+            ['https://www.youtube.com/channel/UCabcd',                          null],
+        ];
+    }
+
+    /**
+     * @SuppressWarnings(PHPMD.StaticAccess)
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('provideP953UrlCases')]
+    public function test_parseP953Url(string $url, ?array $expected): void
+    {
+        $this->assertSame($expected, \WikiStream::parseP953Url($url));
+    }
+
+    // ------------------------------------------------------------------
+    // A4: import_p953_urls() promotes wdt:P953 URLs into native host
+    // properties via QuickStatements; honours the P11484 opt-out
+    // qualifier and a per-run cap.
+    // ------------------------------------------------------------------
+
+    private function makeP953Claim(string $url, bool $optOut = false): object
+    {
+        $claim = new \stdClass();
+        $claim->mainsnak = new \stdClass();
+        $claim->mainsnak->datavalue = new \stdClass();
+        $claim->mainsnak->datavalue->value = $url;
+        $claim->mainsnak->datavalue->type = 'string';
+        if ($optOut) {
+            $claim->qualifiers = new \stdClass();
+            $qual = new \stdClass();
+            $qual->datavalue = new \stdClass();
+            $qual->datavalue->value = (object) ['id' => 'Q124428688'];
+            $claim->qualifiers->P11484 = [$qual];
+        }
+        return $claim;
+    }
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    private function makeRecordingWikiStream(\WikidataItemList $wil, \ToolforgeCommon $tfc): object
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        return new class($config, $tfc, null, $wil) extends \WikiStream {
+            public array $capturedCommands = [];
+            private \WikidataItemList $injectedWil;
+            public function __construct($config, $tfc, $http, \WikidataItemList $wil)
+            {
+                parent::__construct($config, $tfc, $http);
+                $this->injectedWil = $wil;
+            }
+            protected function loadWikidataItemList(array $qs): \WikidataItemList
+            {
+                unset($qs);
+                return $this->injectedWil;
+            }
+            protected function pushQuickStatements(array $commands): void
+            {
+                $this->capturedCommands = $commands;
+            }
+        };
+    }
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_import_p953_urls_emits_commands_for_known_hosts(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $tfc->method('getSPARQL_TSV')->willReturn([
+            ['q' => 'http://www.wikidata.org/entity/Q42'],
+        ]);
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+
+        $claims = [
+            $this->makeP953Claim('https://archive.org/details/foo'),
+            $this->makeP953Claim('https://www.youtube.com/watch?v=AAAAAAAAAAA'),
+            $this->makeP953Claim('https://example.com/unsupported'),
+            $this->makeP953Claim('https://vimeo.com/123', optOut: true),
+        ];
+        $item = new class($claims) extends \WikidataItem {
+            private array $p953;
+            public function __construct(array $p953)
+            {
+                parent::__construct((object) ['id' => 'Q42']);
+                $this->p953 = $p953;
+            }
+            public function getClaims(string|int $prop): array
+            {
+                $key = (int) preg_replace('/\D/', '', (string) $prop);
+                return $key === 953 ? $this->p953 : [];
+            }
+        };
+
+        $wil = new \WikidataItemList();
+        $wil->setItem(42, $item);
+
+        $ws = $this->makeRecordingWikiStream($wil, $tfc);
+        $ws->import_p953_urls();
+
+        $this->assertCount(2, $ws->capturedCommands);
+
+        $joined = implode("\n", $ws->capturedCommands);
+        $this->assertStringContainsString("Q42\tP724\t\"foo\"", $joined);
+        $this->assertStringContainsString("Q42\tP1651\t\"AAAAAAAAAAA\"", $joined);
+        $this->assertStringNotContainsString('123', $joined);
+    }
+
+    // ------------------------------------------------------------------
+    // A5: import_ia_curated_films() INSERTs items whose IA collection is
+    // in the curated whitelist.
+    // ------------------------------------------------------------------
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_import_ia_curated_films_inserts_only_whitelisted_collections(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $tfc->method('getSPARQL_TSV')->willReturn([
+            ['q' => 'http://www.wikidata.org/entity/Q101', 'ia' => 'feature-film-1'],
+            ['q' => 'http://www.wikidata.org/entity/Q102', 'ia' => 'random-clip'],
+            ['q' => 'http://www.wikidata.org/entity/Q103', 'ia' => 'silent-film-1'],
+            ['q' => 'http://www.wikidata.org/entity/Q104', 'ia' => 'dark-item'],
+        ]);
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+
+        $insertSqls = [];
+        $tfc->method('getSQL')->willReturnCallback(function ($db, string $sql) use (&$insertSqls) {
+            if (stripos($sql, 'INSERT') === 0) {
+                $insertSqls[] = $sql;
+            }
+            return $this->emptyResult();
+        });
+
+        $http = $this->createMock(\HttpClientInterface::class);
+        $http->method('getJsonBatch')->willReturnCallback(function (array $urlsByKey) {
+            $byQ = [];
+            foreach ($urlsByKey as $q => $url) {
+                $j = new \stdClass();
+                $j->metadata = new \stdClass();
+                if (str_contains($url, 'feature-film-1')) {
+                    $j->metadata->collection = ['feature_films_unsorted', 'feature_films'];
+                } elseif (str_contains($url, 'silent-film-1')) {
+                    $j->metadata->collection = ['silent_films'];
+                } elseif (str_contains($url, 'random-clip')) {
+                    $j->metadata->collection = ['some_random_collection'];
+                } elseif (str_contains($url, 'dark-item')) {
+                    $j->is_dark = true;
+                }
+                $byQ[$q] = $j;
+            }
+            return $byQ;
+        });
+
+        $config = new \WikiStreamConfigWikiFlix();
+        $ws = new \WikiStream($config, $tfc, $http);
+        $ws->import_ia_curated_films();
+
+        $joined = implode("\n", $insertSqls);
+        $this->assertStringContainsString('101', $joined);
+        $this->assertStringContainsString('103', $joined);
+        $this->assertStringNotContainsString('102', $joined);
+        $this->assertStringNotContainsString('104', $joined);
+    }
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_import_ia_curated_films_no_candidates_skips_http(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $tfc->method('getSPARQL_TSV')->willReturn([]);
+
+        $http = $this->createMock(\HttpClientInterface::class);
+        $http->expects($this->never())->method('getJsonBatch');
+        $http->expects($this->never())->method('getJson');
+
+        $config = new \WikiStreamConfigWikiFlix();
+        $ws = new \WikiStream($config, $tfc, $http);
+        $ws->import_ia_curated_films();
+    }
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_import_ia_curated_films_caps_per_run(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+
+        $rows = [];
+        for ($q = 1; $q <= 200; $q++) {
+            $rows[] = ['q' => "http://www.wikidata.org/entity/Q{$q}", 'ia' => "ia-id-{$q}"];
+        }
+        $tfc->method('getSPARQL_TSV')->willReturn($rows);
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+        $tfc->method('getSQL')->willReturn($this->emptyResult());
+
+        $http = $this->createMock(\HttpClientInterface::class);
+        $batchCalls = 0;
+        $http->method('getJsonBatch')->willReturnCallback(function (array $urlsByKey) use (&$batchCalls) {
+            $batchCalls++;
+            $byQ = [];
+            foreach (array_keys($urlsByKey) as $q) {
+                $j = new \stdClass();
+                $j->metadata = new \stdClass();
+                $j->metadata->collection = ['feature_films'];
+                $byQ[$q] = $j;
+            }
+            return $byQ;
+        });
+
+        $config = new \WikiStreamConfigWikiFlix();
+        $ws = new \WikiStream($config, $tfc, $http);
+        $ws->import_ia_curated_films();
+
+        $this->assertGreaterThan(0, $batchCalls);
+    }
+
+    /**
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    public function test_import_p953_urls_caps_commands_per_run(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+
+        $rows = [];
+        for ($q = 1; $q <= 150; $q++) {
+            $rows[] = ['q' => "http://www.wikidata.org/entity/Q{$q}"];
+        }
+        $tfc->method('getSPARQL_TSV')->willReturn($rows);
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+
+        $wil = new \WikidataItemList();
+        for ($q = 1; $q <= 150; $q++) {
+            $claim = $this->makeP953Claim("https://archive.org/details/id{$q}");
+            $item = new class([$claim], $q) extends \WikidataItem {
+                private array $p953;
+                public function __construct(array $p953, int $q)
+                {
+                    parent::__construct((object) ['id' => "Q{$q}"]);
+                    $this->p953 = $p953;
+                }
+                public function getClaims(string|int $prop): array
+                {
+                    $key = (int) preg_replace('/\D/', '', (string) $prop);
+                    return $key === 953 ? $this->p953 : [];
+                }
+            };
+            $wil->setItem($q, $item);
+        }
+
+        $ws = $this->makeRecordingWikiStream($wil, $tfc);
+        $ws->import_p953_urls();
+
+        $this->assertSame(\WikiStream::P953_COMMANDS_PER_RUN, count($ws->capturedCommands));
+    }
 }
