@@ -7,6 +7,7 @@
 
 import { ttMixin } from '../../resources/vue_es6/state.js';
 import { useLog } from '../composables/useLog.js';
+import { useFetch } from '../composables/useFetch.js';
 
 const { ref, onMounted } = Vue;
 
@@ -20,6 +21,7 @@ export default {
         const config = window.config || {};
 
         const { log } = useLog();
+        const { error, run } = useFetch();
 
         onMounted(async () => {
             log('year_loaded', { q: props.year ?? 0 });
@@ -28,19 +30,15 @@ export default {
                 loading.value = false;
                 return;
             }
-            try {
-                const res = await fetch(
-                    './api.php?action=get_items_by_year&year=' +
-                        encodeURIComponent(props.year),
-                );
-                const j = await res.json();
-                entries.value = j.data || [];
-            } finally {
-                loading.value = false;
-            }
+            const j = await run(
+                './api.php?action=get_items_by_year&year=' +
+                    encodeURIComponent(props.year),
+            );
+            if (j) entries.value = j.data || [];
+            loading.value = false;
         });
 
-        return { loading, entries, config };
+        return { loading, entries, config, error };
     },
     template: `
         <div class="container-fluid">
@@ -61,7 +59,8 @@ export default {
                         </div>
                         <div style="flex-grow: 1;"></div>
                     </div>
-                    <skeleton-row v-if="loading" :count="12"></skeleton-row>
+                    <error-banner v-if="error" :error="error"></error-banner>
+                    <skeleton-row v-else-if="loading" :count="12"></skeleton-row>
                     <div v-else-if="entries.length>0">
                         <h3>{{year}}</h3>
                         <section-row :entries="entries" multi_row="1"></section-row>

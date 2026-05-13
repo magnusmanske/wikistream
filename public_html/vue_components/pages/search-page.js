@@ -6,6 +6,7 @@
  */
 
 import { ttMixin } from '../../resources/vue_es6/state.js';
+import { useFetch } from '../composables/useFetch.js';
 
 const { ref, onMounted } = Vue;
 
@@ -19,23 +20,21 @@ export default {
         const entries = ref([]);
         const sections = ref([]);
         const people = ref([]);
+        const { error, run } = useFetch();
 
         async function run_search() {
             if (query.value === '') return;
             loading.value = true;
-            try {
-                const res = await fetch(
-                    './api.php?action=search&query=' +
-                        encodeURIComponent(query.value),
-                );
-                const j = await res.json();
+            const j = await run(
+                './api.php?action=search&query=' + encodeURIComponent(query.value),
+            );
+            if (j) {
                 entries.value = j.data?.entries || [];
                 sections.value = j.data?.sections || [];
                 people.value = j.data?.people || [];
-            } finally {
-                loading.value = false;
-                focusInput();
             }
+            loading.value = false;
+            focusInput();
         }
 
         function focusInput() {
@@ -53,7 +52,7 @@ export default {
             }
         });
 
-        return { loading, query, entries, sections, people, run_search };
+        return { loading, query, entries, sections, people, error, run_search };
     },
     methods: {
         // $router only available on Options-API `this`.
@@ -77,7 +76,8 @@ export default {
                         <div style="flex-grow: 1;"></div>
                     </div>
 
-                    <skeleton-row v-if="loading" :count="12"></skeleton-row>
+                    <error-banner v-if="error" :error="error"></error-banner>
+                    <skeleton-row v-else-if="loading" :count="12"></skeleton-row>
                     <div v-else-if="query==''"></div>
                     <div v-else-if="entries.length+sections.length+people.length==0">
                         <i tt="no_search_results"></i>

@@ -6,6 +6,7 @@
  */
 
 import { state, ttMixin } from '../../resources/vue_es6/state.js';
+import { useFetch } from '../composables/useFetch.js';
 
 const { ref, onMounted, computed } = Vue;
 
@@ -15,20 +16,17 @@ export default {
     setup() {
         const loading = ref(true);
         const entries = ref([]);
+        const { error, run } = useFetch();
 
         const user_name = computed(() => state.widar?.userinfo?.name || '');
 
         onMounted(async () => {
-            try {
-                const res = await fetch('./api.php?action=get_your_list');
-                const j = await res.json();
-                entries.value = j.data || [];
-            } finally {
-                loading.value = false;
-            }
+            const j = await run('./api.php?action=get_your_list');
+            if (j) entries.value = j.data || [];
+            loading.value = false;
         });
 
-        return { loading, entries, user_name };
+        return { loading, entries, user_name, error };
     },
     template: `
         <div class="container-fluid">
@@ -37,7 +35,8 @@ export default {
                 <div>
                     <h1>{{user_name}}</h1>
                 </div>
-                <skeleton-row v-if="loading" :count="12"></skeleton-row>
+                <error-banner v-if="error" :error="error"></error-banner>
+                <skeleton-row v-else-if="loading" :count="12"></skeleton-row>
                 <div v-else>
                     <h2 tt="your_list"></h2>
                     <section-row :entries="entries" multi_row="1"></section-row>

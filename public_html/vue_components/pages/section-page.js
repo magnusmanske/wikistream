@@ -4,6 +4,7 @@
 
 import { ttMixin } from '../../resources/vue_es6/state.js';
 import { useLog } from '../composables/useLog.js';
+import { useFetch } from '../composables/useFetch.js';
 
 const { ref, onMounted } = Vue;
 
@@ -16,6 +17,7 @@ export default {
         const section = ref({});
 
         const { log } = useLog();
+        const { error, run } = useFetch();
 
         onMounted(async () => {
             log('section_loaded', { q: props.section_q });
@@ -24,22 +26,19 @@ export default {
             if (typeof props.section_prop !== 'undefined') {
                 url += '&prop=' + encodeURIComponent(props.section_prop);
             }
-            try {
-                const res = await fetch(url);
-                const j = await res.json();
-                section.value = j.data || {};
-            } finally {
-                loading.value = false;
-            }
+            const j = await run(url);
+            if (j) section.value = j.data || {};
+            loading.value = false;
         });
 
-        return { loading, section };
+        return { loading, section, error };
     },
     template: `
         <div class="container-fluid">
             <page-header></page-header>
             <div class="row" style="width:100%;">
-                <skeleton-row v-if="loading" :count="12"></skeleton-row>
+                <error-banner v-if="error" :error="error"></error-banner>
+                <skeleton-row v-else-if="loading" :count="12"></skeleton-row>
                 <div v-else>
                     <div>
                         <section-row :section="section" nolink="1" multi_row="1"></section-row>

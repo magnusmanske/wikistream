@@ -8,6 +8,7 @@
 
 import { state, ttMixin } from '../../resources/vue_es6/state.js';
 import { useLog } from '../composables/useLog.js';
+import { useFetch } from '../composables/useFetch.js';
 import { useWikipediaDescription } from '../composables/useWikipediaDescription.js';
 
 const { ref, onMounted, computed } = Vue;
@@ -36,6 +37,7 @@ export default {
 		const cfg = window.config || {};
 
 		const { log } = useLog();
+		const { error, run } = useFetch();
 		const { load: loadWikipediaDescription } = useWikipediaDescription();
 
 		const associated_people_props = computed(() =>
@@ -47,13 +49,8 @@ export default {
 			log('entry_loaded', { q: props.q });
 
 			// 1. Fetch the entry summary from our API.
-			try {
-				const res = await fetch(`./api.php?action=get_entry&q=${encodeURIComponent(props.q)}`);
-				const j = await res.json();
-				entry.value = j.data;
-			} catch (_) {
-				entry.value = null;
-			}
+			const j = await run(`./api.php?action=get_entry&q=${encodeURIComponent(props.q)}`);
+			entry.value = j ? j.data : null;
 
 			// 2. Load the Wikidata item via the shared WikiData batch loader.
 			await new Promise((resolve) => {
@@ -170,7 +167,7 @@ export default {
 
 		return {
 			loading, item, entry, cast, tags, description, person_images,
-			associated_people_props, social,
+			associated_people_props, social, error,
 		};
 	},
 	methods: {
@@ -193,7 +190,8 @@ export default {
         <div class="container-fluid">
             <page-header></page-header>
             <div class="row" style="width: 100%">
-                <div v-if="loading" style="width: 100%">
+                <error-banner v-if="error" :error="error"></error-banner>
+                <div v-else-if="loading" style="width: 100%">
                     <div style="display: flex; margin-bottom: 1rem;">
                         <div class="skeleton-thumb" style="width: 260px; aspect-ratio: 26/40; height: auto; border-radius: 0;"></div>
                         <div style="flex-grow: 1; margin-left: 1rem; display: flex; flex-direction: column; gap: 0.5rem;">

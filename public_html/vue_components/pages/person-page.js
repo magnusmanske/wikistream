@@ -5,6 +5,7 @@
 
 import { ttMixin } from '../../resources/vue_es6/state.js';
 import { useLog } from '../composables/useLog.js';
+import { useFetch } from '../composables/useFetch.js';
 import { useWikipediaDescription } from '../composables/useWikipediaDescription.js';
 
 const { ref, onMounted } = Vue;
@@ -19,6 +20,7 @@ export default {
 		const description = ref('');
 
 		const { log } = useLog();
+		const { error, run } = useFetch();
 		const { load: loadWikipediaDescription } = useWikipediaDescription();
 
 		onMounted(async () => {
@@ -27,12 +29,10 @@ export default {
 
 			// Fetch person data and the Wikipedia description in parallel —
 			// they're independent.
-			const personPromise = fetch(`./api.php?action=get_person&q=${q}`)
-				.then((r) => r.json())
+			const personPromise = run(`./api.php?action=get_person&q=${q}`)
 				.then((j) => {
-					person.value = j.data || {};
+					if (j) person.value = j.data || {};
 				})
-				.catch(() => { /* leave person empty */ })
 				.finally(() => {
 					loading.value = false;
 				});
@@ -44,13 +44,14 @@ export default {
 			await Promise.all([personPromise, descPromise]);
 		});
 
-		return { loading, person, description };
+		return { loading, person, description, error };
 	},
 	template: `
         <div class="container-fluid">
             <page-header></page-header>
             <div class="row" style="width:100%;">
-                <skeleton-row v-if="loading" :count="12"></skeleton-row>
+                <error-banner v-if="error" :error="error"></error-banner>
+                <skeleton-row v-else-if="loading" :count="12"></skeleton-row>
                 <div v-else>
                     <div style="display:flex;margin-bottom: 1rem;">
                         <div style="width:280px; text-align: center;">

@@ -3,6 +3,7 @@
  */
 
 import { ttMixin } from '../../resources/vue_es6/state.js';
+import { useFetch } from '../composables/useFetch.js';
 
 const { ref, onMounted } = Vue;
 
@@ -12,26 +13,22 @@ export default {
     setup() {
         const loading = ref(true);
         const sections = ref([]);
+        const { error, run } = useFetch();
 
         onMounted(async () => {
-            try {
-                const res = await fetch('./api.php?action=get_all_sections');
-                const j = await res.json();
-                sections.value = j.data || [];
-            } catch (_) {
-                sections.value = [];
-            } finally {
-                loading.value = false;
-            }
+            const j = await run('./api.php?action=get_all_sections');
+            if (j) sections.value = j.data || [];
+            loading.value = false;
         });
 
-        return { loading, sections };
+        return { loading, sections, error };
     },
     template: `
         <div class="container-fluid">
             <page-header></page-header>
             <div class="row" style="width:100%;">
-                <div v-if="loading" style="width: 100%;display: flex;">
+                <error-banner v-if="error" :error="error"></error-banner>
+                <div v-else-if="loading" style="width: 100%;display: flex;">
                     <div style="flex-grow: 1;"></div>
                     <div style="width: 50%;">
                         <skeleton-table :rows="10" :cols="2"></skeleton-table>

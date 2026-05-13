@@ -7,6 +7,7 @@
  */
 
 import { ttMixin } from '../../resources/vue_es6/state.js';
+import { useFetch } from '../composables/useFetch.js';
 
 const { ref, onMounted, computed } = Vue;
 
@@ -20,20 +21,19 @@ export default {
         const loading = ref(true);
         const candidates = ref([]);
         const total_candidates = ref(0);
+        const { error, run } = useFetch();
 
         const offset_num = computed(() => parseInt(props.offset, 10) || 0);
 
         onMounted(async () => {
-            try {
-                const res = await fetch(
-                    `./api.php?action=get_candidate_items&offset=${offset_num.value}`,
-                );
-                const j = await res.json();
+            const j = await run(
+                `./api.php?action=get_candidate_items&offset=${offset_num.value}`,
+            );
+            if (j) {
                 candidates.value = j.data || [];
                 total_candidates.value = j.total_candidates || 0;
-            } finally {
-                loading.value = false;
             }
+            loading.value = false;
         });
 
         function getLabelYear(c) {
@@ -42,7 +42,7 @@ export default {
             return encodeURIComponent(query);
         }
 
-        return { loading, candidates, total_candidates, offset_num, getLabelYear, BATCH };
+        return { loading, candidates, total_candidates, offset_num, getLabelYear, BATCH, error };
     },
     methods: {
         // <pagination> emits the new item offset directly.
@@ -54,7 +54,8 @@ export default {
         <div class="container-fluid">
             <page-header></page-header>
             <div class="row" style="width:100%;">
-                <div v-if="loading" style="display: flex;">
+                <error-banner v-if="error" :error="error"></error-banner>
+                <div v-else-if="loading" style="display: flex;">
                     <div style="flex-grow: 1;"></div>
                     <div style="width: 50%;">
                         <skeleton-table :rows="10" :cols="7"></skeleton-table>
