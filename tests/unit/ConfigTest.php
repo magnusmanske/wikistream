@@ -66,6 +66,8 @@ final class ConfigTest extends TestCase
      * domain by copyright holder") and any future PD-equivalent subclass
      * are also matched. The hard-coded `wdt:P6216 wd:Q19652` only matched
      * the exact item.
+     *
+     * @return void
      */
     public function test_wikiflix_query1_uses_p6216_subclass_path(): void
     {
@@ -82,6 +84,8 @@ final class ConfigTest extends TestCase
     /**
      * A1: the change must not weaken existing filters — the film P31
      * subclass walk and the glass-positive MINUS must still be present.
+     *
+     * @return void
      */
     public function test_wikiflix_query1_keeps_film_filter_and_glass_minus(): void
     {
@@ -98,6 +102,8 @@ final class ConfigTest extends TestCase
      * any CC-*-ND variant. The ND exclusion is done dynamically via a
      * label-contains-"noderiv" filter to remain robust against new
      * jurisdictional ND variants being added to Wikidata.
+     *
+     * @return void
      */
     public function test_wikiflix_has_cc_license_query(): void
     {
@@ -119,7 +125,7 @@ final class ConfigTest extends TestCase
             $query,
             'CC-license query must exclude NoDerivatives variants.'
         );
-        // Same media-availability shape as query #1
+        // Same media-availability shape as query #1.
         $this->assertStringContainsString('hasMedia', $query, 'CC-license query must use the hasMedia filter shape.');
     }
 

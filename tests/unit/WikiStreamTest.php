@@ -1145,21 +1145,27 @@ final class WikiStreamTest extends TestCase
      */
     private function makeFileClaim(string $key, bool $optOut = false): object
     {
-        $c = new \stdClass();
-        $c->mainsnak = new \stdClass();
-        $c->mainsnak->datavalue = new \stdClass();
-        $c->mainsnak->datavalue->value = $key;
-        $c->mainsnak->datavalue->type = 'string';
+        $claim = new \stdClass();
+        $claim->mainsnak = new \stdClass();
+        $claim->mainsnak->datavalue = new \stdClass();
+        $claim->mainsnak->datavalue->value = $key;
+        $claim->mainsnak->datavalue->type = 'string';
         if ($optOut) {
-            $c->qualifiers = new \stdClass();
+            $claim->qualifiers = new \stdClass();
             $qual = new \stdClass();
             $qual->datavalue = new \stdClass();
             $qual->datavalue->value = (object) ['id' => 'Q124428688'];
-            $c->qualifiers->P11484 = [$qual];
+            $claim->qualifiers->P11484 = [$qual];
         }
-        return $c;
+        return $claim;
     }
 
+    /**
+     * `$ws` matches the file-wide convention for the WikiStream-under-test
+     * variable; suppress PHPMD's ShortVariable rule for this method only.
+     *
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
     public function test_p11484_opt_out_applies_to_all_file_props(): void
     {
         [$ws] = $this->makeWikiStream();
@@ -1176,6 +1182,9 @@ final class WikiStreamTest extends TestCase
             11731 => [$this->makeFileClaim('optedout-dm-id', optOut: true)],
         ];
 
+        // Only getClaims is overridden; the bootstrap stub's defaults
+        // (empty label, empty sitelinks, empty getFirstString/getTarget)
+        // are sufficient for the opt-out code path we're exercising.
         $item = new class($claims) extends \WikidataItem {
             private array $claimsByProp;
             public function __construct(array $claimsByProp)
@@ -1188,10 +1197,6 @@ final class WikiStreamTest extends TestCase
                 $key = (int) preg_replace('/\D/', '', (string) $prop);
                 return $this->claimsByProp[$key] ?? [];
             }
-            public function getLabel(string $lang = 'en'): string { return 'Test Film'; }
-            public function getSitelinks(): array { return []; }
-            public function getFirstString(string $prop): string { return ''; }
-            public function getTarget(object $claim): string { return ''; }
         };
 
         $wil = new \WikidataItemList();
@@ -1200,19 +1205,17 @@ final class WikiStreamTest extends TestCase
         $qs = [];
         $sections = [];
         $entry_files = [];
-        $items_for_labels = []; // array form so add_item_details defers labels
+        $items_for_labels = []; // array form so add_item_details defers labels.
         $item_rows = [];
 
-        // add_item_details is protected and takes references. Use a closure
-        // bound to the instance so PHP threads the by-reference args through
-        // without reflection's invokeArgs limitations.
-        $invoke = \Closure::bind(
-            function ($wil, $q, &$qs, &$sections, &$entry_files, &$items_for_labels, &$item_rows) {
-                $this->add_item_details($wil, $q, $qs, $sections, $entry_files, $items_for_labels, $item_rows);
-            },
-            $ws,
-            \WikiStream::class,
-        );
+        // add_item_details is protected and takes references. bindTo() (the
+        // instance form of Closure::bind) lets the closure see protected
+        // methods while keeping by-reference args working — reflection's
+        // invokeArgs cannot pass references through.
+        $invoke = function ($wil, $q, &$qs, &$sections, &$entry_files, &$items_for_labels, &$item_rows) {
+            $this->add_item_details($wil, $q, $qs, $sections, $entry_files, $items_for_labels, $item_rows);
+        };
+        $invoke = $invoke->bindTo($ws, \WikiStream::class);
         $invoke($wil, 42, $qs, $sections, $entry_files, $items_for_labels, $item_rows);
 
         // Clean files for every property are kept; opted-out keys are dropped.
