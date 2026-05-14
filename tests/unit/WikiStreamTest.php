@@ -522,13 +522,25 @@ final class WikiStreamTest extends TestCase
     // ------------------------------------------------------------------
 
     /**
-     * Build a fake sibling row as the JOIN query would produce.
+     * Build a group-membership row as the first query produces:
+     * one row per (group_q, group_title) for the current item.
      */
-    private function siblingRow(int $group_q, string $group_title, int $q, string $title, $position = null): \stdClass
+    private function groupMembershipRow(int $group_q, ?string $group_title): \stdClass
+    {
+        $row = new \stdClass();
+        $row->group_q     = $group_q;
+        $row->group_title = $group_title;
+        return $row;
+    }
+
+    /**
+     * Build a sibling row as the second query produces:
+     * group_q + vw_ranked_entries columns + group_position.
+     */
+    private function siblingRow(int $group_q, int $q, string $title, $position = null): \stdClass
     {
         $row = new \stdClass();
         $row->group_q        = $group_q;
-        $row->group_title    = $group_title;
         $row->q              = $q;
         $row->title          = $title;
         $row->image          = null;
@@ -544,12 +556,35 @@ final class WikiStreamTest extends TestCase
         return $row;
     }
 
-    public function test_get_sibling_group_entries_returns_empty_array_when_no_rows(): void
+    /**
+     * Wire $tfc->getSQL so the Nth call returns the Nth result set in
+     * $results. Captures every SQL string into &$captured. Sets are
+     * pre-built fake mysqli results.
+     *
+     * @param list<object> $results
+     */
+    private function stubSqlSequence(MockObject $tfc, array $results, array &$captured): void
+    {
+        $i = 0;
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured, &$i, $results) {
+                $captured[] = $sql;
+                $r = $results[$i] ?? $this->emptyResult();
+                $i++;
+                return $r;
+            });
+    }
+
+    public function test_get_sibling_group_entries_returns_empty_array_when_item_has_no_groups(): void
     {
         [$ws, $tfc] = $this->makeWikiStream();
-        $tfc->method('getSQL')->willReturn($this->emptyResult());
+        // First query (group memberships) returns nothing → second query
+        // must NOT be issued.
+        $captured = [];
+        $this->stubSqlSequence($tfc, [$this->emptyResult()], $captured);
 
         $this->assertSame([], $ws->get_sibling_group_entries(123));
+        $this->assertCount(1, $captured);
     }
 
     public function test_get_sibling_group_entries_returns_empty_for_invalid_q(): void
@@ -564,36 +599,90 @@ final class WikiStreamTest extends TestCase
     public function test_get_sibling_group_entries_emits_sql_that_excludes_current_item(): void
     {
         [$ws, $tfc] = $this->makeWikiStream();
-
-        $captured = '';
-        $tfc->expects($this->once())
-            ->method('getSQL')
-            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
-                $captured = $sql;
-                return $this->emptyResult();
-            });
+        $captured = [];
+        $this->stubSqlSequence(
+            $tfc,
+            [$this->makeResult([$this->groupMembershipRow(100, 'Series A')]), $this->emptyResult()],
+            $captured,
+        );
 
         $ws->get_sibling_group_entries(42);
 
-        $this->assertStringContainsString('group_item', $captured);
-        $this->assertStringContainsString('vw_ranked_entries', $captured);
-        $normalized = str_replace([' ', '`'], '', $captured);
-        // Current item is excluded from the sibling list
-        $this->assertStringContainsString('item_q!=42', $normalized);
-        // The sibling set is scoped to groups the current item belongs to
-        $this->assertStringContainsString('item_q=42', $normalized);
+        // First query: groups for this item, LEFT JOIN with `group`.
+        $this->assertStringContainsString('group_item', $captured[0]);
+        $this->assertStringContainsString('LEFT JOIN `group`', $captured[0]);
+        $normalized0 = str_replace([' ', '`'], '', $captured[0]);
+        $this->assertStringContainsString('item_q=42', $normalized0);
+
+        // Second query: siblings in those groups, INNER JOIN with vw_ranked_entries.
+        $this->assertStringContainsString('vw_ranked_entries', $captured[1]);
+        $normalized1 = str_replace([' ', '`'], '', $captured[1]);
+        $this->assertStringContainsString('item_q!=42', $normalized1);
+        $this->assertStringContainsString('group_qIN(100)', $normalized1);
     }
 
-    public function test_get_sibling_group_entries_groups_rows_by_group_q(): void
+    public function test_get_sibling_group_entries_returns_group_with_no_siblings(): void
     {
         [$ws, $tfc] = $this->makeWikiStream();
+        $captured = [];
+        $this->stubSqlSequence(
+            $tfc,
+            [
+                $this->makeResult([$this->groupMembershipRow(12060736, 'Industry on Parade')]),
+                $this->emptyResult(), // no other IOP episodes in WikiFlix
+            ],
+            $captured,
+        );
 
-        $rows = [
-            $this->siblingRow(100, 'Series A', 11, 'A-Ep-1', 1),
-            $this->siblingRow(100, 'Series A', 12, 'A-Ep-2', 2),
-            $this->siblingRow(200, 'Series B', 21, 'B-Ep-1', 1),
-        ];
-        $tfc->method('getSQL')->willReturn($this->makeResult($rows));
+        $groups = $ws->get_sibling_group_entries(128008934);
+
+        $this->assertCount(1, $groups);
+        $this->assertSame(12060736, (int) $groups[0]->q);
+        $this->assertSame('Industry on Parade', $groups[0]->title);
+        $this->assertSame(0, $groups[0]->total);
+        $this->assertSame([], $groups[0]->entries);
+    }
+
+    public function test_get_sibling_group_entries_falls_back_to_empty_title_when_group_metadata_missing(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = [];
+        // group_title is NULL — LEFT JOIN with `group` produced no match.
+        $this->stubSqlSequence(
+            $tfc,
+            [
+                $this->makeResult([$this->groupMembershipRow(999, null)]),
+                $this->makeResult([$this->siblingRow(999, 11, 'Sibling-1', 1)]),
+            ],
+            $captured,
+        );
+
+        $groups = $ws->get_sibling_group_entries(42);
+
+        $this->assertCount(1, $groups);
+        $this->assertSame('', $groups[0]->title);
+        $this->assertCount(1, $groups[0]->entries);
+    }
+
+    public function test_get_sibling_group_entries_groups_siblings_by_group_q(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = [];
+        $this->stubSqlSequence(
+            $tfc,
+            [
+                $this->makeResult([
+                    $this->groupMembershipRow(100, 'Series A'),
+                    $this->groupMembershipRow(200, 'Series B'),
+                ]),
+                $this->makeResult([
+                    $this->siblingRow(100, 11, 'A-Ep-1', 1),
+                    $this->siblingRow(100, 12, 'A-Ep-2', 2),
+                    $this->siblingRow(200, 21, 'B-Ep-1', 1),
+                ]),
+            ],
+            $captured,
+        );
 
         $groups = $ws->get_sibling_group_entries(42);
 
@@ -606,25 +695,28 @@ final class WikiStreamTest extends TestCase
         $this->assertSame(12, (int) $groups[0]->entries[1]->q);
 
         $this->assertSame(200, (int) $groups[1]->q);
-        $this->assertSame('Series B', $groups[1]->title);
         $this->assertSame(1, $groups[1]->total);
-        $this->assertCount(1, $groups[1]->entries);
         $this->assertSame(21, (int) $groups[1]->entries[0]->q);
     }
 
     public function test_get_sibling_group_entries_strips_join_only_fields_from_entries(): void
     {
         [$ws, $tfc] = $this->makeWikiStream();
-
-        $rows = [$this->siblingRow(100, 'Series A', 11, 'A-Ep-1', 1)];
-        $tfc->method('getSQL')->willReturn($this->makeResult($rows));
+        $captured = [];
+        $this->stubSqlSequence(
+            $tfc,
+            [
+                $this->makeResult([$this->groupMembershipRow(100, 'Series A')]),
+                $this->makeResult([$this->siblingRow(100, 11, 'A-Ep-1', 1)]),
+            ],
+            $captured,
+        );
 
         $groups = $ws->get_sibling_group_entries(42);
         $entry  = $groups[0]->entries[0];
 
         // JOIN-only columns must not leak into the per-entry shape consumed by <entry-thumb>
         $this->assertObjectNotHasProperty('group_q', $entry);
-        $this->assertObjectNotHasProperty('group_title', $entry);
         $this->assertObjectNotHasProperty('group_position', $entry);
         // Standard entry fields are preserved
         $this->assertSame(11, (int) $entry->q);
@@ -635,10 +727,17 @@ final class WikiStreamTest extends TestCase
     public function test_get_sibling_group_entries_decodes_files_via_fix_item_image(): void
     {
         [$ws, $tfc] = $this->makeWikiStream();
-
-        $row = $this->siblingRow(100, 'Series A', 11, 'A-Ep-1', 1);
+        $row = $this->siblingRow(100, 11, 'A-Ep-1', 1);
         $row->files = '[{"property":10,"key":"Some_file.webm","is_trailer":0,"minutes":12}]';
-        $tfc->method('getSQL')->willReturn($this->makeResult([$row]));
+        $captured = [];
+        $this->stubSqlSequence(
+            $tfc,
+            [
+                $this->makeResult([$this->groupMembershipRow(100, 'Series A')]),
+                $this->makeResult([$row]),
+            ],
+            $captured,
+        );
 
         $groups = $ws->get_sibling_group_entries(42);
         $entry  = $groups[0]->entries[0];
@@ -651,19 +750,14 @@ final class WikiStreamTest extends TestCase
     public function test_get_sibling_group_entries_casts_q_safely(): void
     {
         [$ws, $tfc] = $this->makeWikiStream();
-
-        $captured = '';
-        $tfc->method('getSQL')
-            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
-                $captured = $sql;
-                return $this->emptyResult();
-            });
+        $captured = [];
+        $this->stubSqlSequence($tfc, [$this->emptyResult()], $captured);
 
         // SQL-injection-style payload must be reduced to the leading int
         $ws->get_sibling_group_entries('42); DROP TABLE `group_item`;--');
 
-        $this->assertStringNotContainsString('DROP', $captured);
-        $this->assertStringContainsString('42', $captured);
+        $this->assertStringNotContainsString('DROP', $captured[0]);
+        $this->assertStringContainsString('42', $captured[0]);
     }
 
     // ------------------------------------------------------------------

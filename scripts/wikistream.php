@@ -276,50 +276,76 @@ class WikiStream
 		return $ret;
 	}
 
-	// Returns the other items that share at least one group_item.group_q with
-	// the given item — e.g. other episodes of the same series, or other
-	// works in the same film franchise. Result is grouped by group_q so the
-	// frontend can render one <section-row> per group.
+	// Returns the groups (series, franchises, …) the given item belongs to,
+	// each carrying any sibling items that are also in WikiFlix.
 	//
 	// Output shape: array of objects { q: <group_q>, title, total, entries }
 	// where each entry matches the columns of vw_ranked_entries (compatible
-	// with <entry-thumb>). The current item is never included in its own
-	// sibling list.
+	// with <entry-thumb>). The current item is never in its own entries list.
+	//
+	// A group is always returned when the item has a group_item row for it,
+	// even if no other items in that group are in WikiFlix yet — the
+	// frontend renders the group title as a "Part of <series>" header in
+	// that case. The `group` table is LEFT JOINed so missing metadata
+	// (group title not yet imported) doesn't suppress the row; the title
+	// falls back to an empty string.
 	public function get_sibling_group_entries($q): array
 	{
 		$q = (int) $q;
 		if ($q <= 0) {
 			return [];
 		}
+		// 1. Which groups does this item belong to? LEFT JOIN `group` so
+		//    that an item with a group_item row but no group metadata
+		//    still shows up (title falls back to '').
 		$sql =
-			"SELECT gi.`group_q` AS `group_q`, g.`title` AS `group_title`, " .
-			"vr.*, gi.`position` AS `group_position` " .
+			"SELECT gi.`group_q` AS `group_q`, g.`title` AS `group_title` " .
 			"FROM `group_item` gi " .
-			"JOIN `group` g ON g.`q`=gi.`group_q` " .
+			"LEFT JOIN `group` g ON g.`q`=gi.`group_q` " .
+			"WHERE gi.`item_q`={$q} " .
+			"ORDER BY gi.`group_q`";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		$byGroup = [];
+		$groupOrder = [];
+		while ($o = $result->fetch_object()) {
+			$group_q = (int) $o->group_q;
+			$byGroup[$group_q] = (object) [
+				"q" => $group_q,
+				"title" => $o->group_title ?? "",
+				"total" => 0,
+				"entries" => [],
+			];
+			$groupOrder[] = $group_q;
+		}
+		$this->freeResult($result);
+		if (empty($byGroup)) {
+			return [];
+		}
+		// 2. Sibling items in those groups that are in vw_ranked_entries.
+		//    INNER JOIN with vw_ranked_entries is intentional — entries
+		//    without files can't be rendered as thumbnails.
+		$gqList = implode(",", array_keys($byGroup));
+		$sql =
+			"SELECT gi.`group_q` AS `group_q`, vr.*, gi.`position` AS `group_position` " .
+			"FROM `group_item` gi " .
 			"JOIN `vw_ranked_entries` vr ON vr.`q`=gi.`item_q` " .
-			"WHERE gi.`group_q` IN (SELECT `group_q` FROM `group_item` WHERE `item_q`={$q}) " .
+			"WHERE gi.`group_q` IN ({$gqList}) " .
 			"AND gi.`item_q`!={$q} " .
 			"ORDER BY gi.`group_q`, gi.`position` IS NULL, gi.`position`, gi.`item_q`";
 		$result = $this->tfc->getSQL($this->db, $sql);
-		$byGroup = [];
 		while ($o = $result->fetch_object()) {
 			$group_q = (int) $o->group_q;
-			$group_title = $o->group_title;
-			unset($o->group_q, $o->group_title, $o->group_position);
+			unset($o->group_q, $o->group_position);
 			$this->fix_item_image($o);
 			if (!isset($byGroup[$group_q])) {
-				$byGroup[$group_q] = (object) [
-					"q" => $group_q,
-					"title" => $group_title,
-					"total" => 0,
-					"entries" => [],
-				];
+				continue; // shouldn't happen given the IN clause
 			}
 			$byGroup[$group_q]->entries[] = $o;
 			$byGroup[$group_q]->total++;
 		}
 		$this->freeResult($result);
-		return array_values($byGroup);
+		// Preserve the order from query 1.
+		return array_map(fn($gq) => $byGroup[$gq], $groupOrder);
 	}
 
 	protected function get_items_in_db(): array
