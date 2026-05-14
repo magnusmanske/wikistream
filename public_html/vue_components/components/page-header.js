@@ -15,61 +15,61 @@ import { loadFavorites } from '../composables/useFavorites.js';
 const { ref, watch } = Vue;
 
 export default {
-    name: 'PageHeader',
-    mixins: [ttMixin],
-    setup() {
-        const search_query = ref('');
+	name: 'PageHeader',
+	mixins: [ttMixin],
+	setup() {
+		const search_query = ref('');
 
-        // Defaults to 0 if config hasn't loaded yet — config.js is a classic
-        // <script> in index.html so it loads synchronously before us.
-        const cfg = window.config || {};
-        const entry_total = cfg.entry_total ?? 0;
-        const person_total = cfg.person_total ?? 0;
-        const section_total = cfg.section_total ?? 0;
-        const help_page = cfg.misc?.help_page ?? '#';
+		// Defaults to 0 if config hasn't loaded yet — config.js is a classic
+		// <script> in index.html so it loads synchronously before us.
+		const cfg = window.config || {};
+		const entry_total = cfg.entry_total ?? 0;
+		const person_total = cfg.person_total ?? 0;
+		const section_total = cfg.section_total ?? 0;
+		const help_page = cfg.misc?.help_page ?? '#';
 
-        // Mobile-only — toggles visibility of the form that is always
-        // shown on wider viewports via CSS media queries.
-        function toggle_search_bar(event) {
-            const header = event.currentTarget.closest('.page-header');
-            if (!header) return;
-            const form = header.querySelector('.page-header-search');
-            if (!form) return;
-            form.classList.toggle('is-visible');
-            if (form.classList.contains('is-visible')) {
-                const first = form.querySelector('input');
-                if (first) first.focus();
-            }
-        }
+		// Mobile-only — toggles visibility of the form that is always
+		// shown on wider viewports via CSS media queries.
+		function toggle_search_bar(event) {
+			const header = event.currentTarget.closest('.page-header');
+			if (!header) return;
+			const form = header.querySelector('.page-header-search');
+			if (!form) return;
+			form.classList.toggle('is-visible');
+			if (form.classList.contains('is-visible')) {
+				const first = form.querySelector('input');
+				if (first) first.focus();
+			}
+		}
 
-        // Once widar reports the user as logged in, fetch their favourites
-        // so <entry-thumb> hearts render correctly across the app.
-        watch(
-            () => state.widar && state.widar.userinfo && state.widar.userinfo.name,
-            (name) => { if (name) loadFavorites(); },
-            { immediate: true },
-        );
+		// Once widar reports the user as logged in, fetch their favourites
+		// so <entry-thumb> hearts render correctly across the app.
+		watch(
+			() => state.widar && state.widar.userinfo && state.widar.userinfo.name,
+			(name) => { if (name) loadFavorites(); },
+			{ immediate: true },
+		);
 
-        return { search_query, entry_total, person_total, section_total, help_page, toggle_search_bar };
-    },
-    methods: {
-        // Methods that need `this.$router` stay as Options-API methods —
-        // accessing the router instance from setup() in Vue 2.7 requires
-        // boilerplate, and this is a small enough surface.
-        do_search() {
-            this.$router.push('/search/' + this.search_query);
-        },
-        async random_entry() {
-            try {
-                const res = await fetch('./api.php?action=get_random_entry');
-                if (!res.ok) return;
-                const j = await res.json();
-                const q = j && j.data && j.data.q;
-                if (q) this.$router.push('/entry/' + q);
-            } catch (_) { /* silent — best-effort discovery */ }
-        },
-    },
-    template: `
+		return { search_query, entry_total, person_total, section_total, help_page, toggle_search_bar };
+	},
+	methods: {
+		// Methods that need `this.$router` stay as Options-API methods —
+		// accessing the router instance from setup() in Vue 2.7 requires
+		// boilerplate, and this is a small enough surface.
+		do_search() {
+			this.$router.push('/search/' + this.search_query);
+		},
+		async random_entry() {
+			try {
+				const res = await fetch('./api.php?action=get_random_entry');
+				if (!res.ok) return;
+				const j = await res.json();
+				const q = j && j.data && j.data.q;
+				if (q) this.$router.push('/entry/' + q);
+			} catch (_) { /* silent — best-effort discovery */ }
+		},
+	},
+	template: `
         <div class="row page-header">
             <router-link to="/"><h1 style="color: red" tt="toolname"></h1></router-link>
             <a :href="help_page" style="color: red; margin-left: 0.5rem;">ⓘ</a>
@@ -97,7 +97,7 @@ export default {
                 <template #loggedin>
                     <router-link to="/you">
                         <span style="font-size:26pt; color: green;" tt_title="logged_in">
-                            <img border="0" decoding="async" src="https://upload.wikimedia.org/wikipedia/commons/thumb/6/61/Emoji_u1f464.svg/180px-Emoji_u1f464.svg.png" width="32px" />
+                            <img border="0" decoding="async" src="https://upload.wikimedia.org/wikipedia/commons/thumb/6/61/Emoji_u1f464.svg/250px-Emoji_u1f464.svg.png" width="32px" />
                         </span>
                     </router-link>
                 </template>
