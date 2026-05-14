@@ -157,8 +157,11 @@ div.person-box {
     text-align: center;
 }
 div.person-picture {
-    width: 260px;
-    max-width: 260px;
+    /* Fill the .person-box content area. Bootstrap sets box-sizing:
+       border-box globally, so .person-box's padding+border subtract
+       from its declared 260px — pinning .person-picture to 260px would
+       overflow the parent by a few pixels. */
+    width: 100%;
     height: 300px;
     margin-bottom: 0.2rem;
     overflow: hidden;
