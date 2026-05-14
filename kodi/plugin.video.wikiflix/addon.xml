@@ -20,5 +20,9 @@
             <icon>resources/icon.png</icon>
             <fanart>resources/fanart.jpg</fanart>
         </assets>
+        <news>
+v0.1.0
+- First release. WikiFlix is a catalogue of freely-licensed films, built on Wikidata and streamed from Wikimedia Commons (with fallbacks to Internet Archive, YouTube, Vimeo and DailyMotion). Browse by section, search the catalogue, and play directly in Kodi.
+        </news>
     </extension>
 </addon>
