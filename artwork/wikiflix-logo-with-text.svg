@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#16213e"/>
+    </linearGradient>
+    <linearGradient id="accentGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e2b714"/>
+      <stop offset="100%" style="stop-color:#f0c644"/>
+    </linearGradient>
+    <radialGradient id="glow2" cx="50%" cy="42%" r="50%">
+      <stop offset="0%" style="stop-color:#e2b714;stop-opacity:0.15"/>
+      <stop offset="100%" style="stop-color:#e2b714;stop-opacity:0"/>
+    </radialGradient>
+    <clipPath id="roundedSquare2">
+      <rect x="0" y="0" width="512" height="512" rx="96" ry="96"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#roundedSquare2)">
+    <rect width="512" height="512" fill="url(#bgGrad2)"/>
+    <circle cx="256" cy="220" r="260" fill="url(#glow2)"/>
+
+    <!-- Film strip sprocket holes (decorative edges) -->
+    <g fill="#e2b714" opacity="0.2">
+      <rect x="24" y="30" width="26" height="18" rx="4"/>
+      <rect x="24" y="66" width="26" height="18" rx="4"/>
+      <rect x="24" y="102" width="26" height="18" rx="4"/>
+      <rect x="24" y="138" width="26" height="18" rx="4"/>
+      <rect x="24" y="174" width="26" height="18" rx="4"/>
+      <rect x="24" y="210" width="26" height="18" rx="4"/>
+      <rect x="24" y="246" width="26" height="18" rx="4"/>
+      <rect x="24" y="282" width="26" height="18" rx="4"/>
+      <rect x="24" y="318" width="26" height="18" rx="4"/>
+      <rect x="24" y="354" width="26" height="18" rx="4"/>
+      <rect x="462" y="30" width="26" height="18" rx="4"/>
+      <rect x="462" y="66" width="26" height="18" rx="4"/>
+      <rect x="462" y="102" width="26" height="18" rx="4"/>
+      <rect x="462" y="138" width="26" height="18" rx="4"/>
+      <rect x="462" y="174" width="26" height="18" rx="4"/>
+      <rect x="462" y="210" width="26" height="18" rx="4"/>
+      <rect x="462" y="246" width="26" height="18" rx="4"/>
+      <rect x="462" y="282" width="26" height="18" rx="4"/>
+      <rect x="462" y="318" width="26" height="18" rx="4"/>
+      <rect x="462" y="354" width="26" height="18" rx="4"/>
+    </g>
+
+    <!-- Film reel circle (shifted up to make room for text) -->
+    <circle cx="256" cy="215" r="140" fill="none" stroke="#e2b714" stroke-width="3.5" opacity="0.28"/>
+    <circle cx="256" cy="215" r="112" fill="none" stroke="#e2b714" stroke-width="2" opacity="0.14"/>
+
+    <!-- Reel spokes -->
+    <g stroke="#e2b714" stroke-width="1.5" opacity="0.1">
+      <line x1="256" y1="75" x2="256" y2="355"/>
+      <line x1="116" y1="215" x2="396" y2="215"/>
+      <line x1="157" y1="116" x2="355" y2="314"/>
+      <line x1="355" y1="116" x2="157" y2="314"/>
+    </g>
+
+    <!-- Inner hub -->
+    <circle cx="256" cy="215" r="38" fill="none" stroke="#e2b714" stroke-width="2.5" opacity="0.22"/>
+
+    <!-- Play triangle -->
+    <polygon points="226,148 226,282 338,215" fill="url(#accentGrad2)" opacity="0.95"/>
+    <polygon points="226,148 226,282 338,215" fill="none" stroke="#fff" stroke-width="1.5" opacity="0.12"/>
+
+    <!-- WikiFlix wordmark -->
+    <text x="256" y="428" text-anchor="middle" font-family="'Georgia', 'Times New Roman', serif" font-size="62" font-weight="bold" letter-spacing="6" fill="#e2b714">
+      <tspan fill="#e2b714">Wiki</tspan><tspan fill="#f0c644" font-style="italic">Flix</tspan>
+    </text>
+
+    <!-- Subtle tagline -->
+    <text x="256" y="462" text-anchor="middle" font-family="'Georgia', 'Times New Roman', serif" font-size="16" letter-spacing="5" fill="#e2b714" opacity="0.45">
+      FREE CINEMA
+    </text>
+  </g>
+</svg>

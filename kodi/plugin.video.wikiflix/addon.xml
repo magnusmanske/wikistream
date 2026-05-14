@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<addon id="plugin.video.wikiflix"
+       name="WikiFlix"
+       version="0.1.0"
+       provider-name="Magnus Manske">
+    <requires>
+        <import addon="xbmc.python" version="3.0.0"/>
+    </requires>
+    <extension point="xbmc.python.pluginsource" library="default.py">
+        <provides>video</provides>
+    </extension>
+    <extension point="xbmc.addon.metadata">
+        <summary lang="en_GB">Freely-licensed films from Wikidata / Wikimedia Commons</summary>
+        <description lang="en_GB">Browse and play the WikiFlix catalogue of free films — sourced from Wikidata and hosted on Wikimedia Commons, the Internet Archive, and other open platforms.</description>
+        <platform>all</platform>
+        <license>MIT</license>
+        <source>https://github.com/magnusmanske/wikistream</source>
+        <website>https://wikiflix.toolforge.org/</website>
+        <assets>
+            <icon>resources/icon.png</icon>
+            <fanart>resources/fanart.jpg</fanart>
+        </assets>
+    </extension>
+</addon>
