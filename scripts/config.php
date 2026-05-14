@@ -23,6 +23,13 @@
 	# means positions are not recorded.
 	public $group_position_qualifier = 0;
 
+	# Property identifying a sub-grouping of items within their parent
+	# group — e.g. P4908 ("season") for TV episodes. The mainsnak target
+	# Q-number is stored in `group_item.subgroup` (as the numeric string
+	# "112174548") so the frontend can render episodes grouped by
+	# season. 0 disables subgroup ingestion.
+	public $group_subgroup_prop = 0;
+
 	# Q-numbers whose presence as the item's primary P31 marks the item
 	# as an "episode" for UI purposes (drives the thumbnail badge). Also
 	# used during ingestion to prefer the episode P31 when an item has
@@ -145,6 +152,7 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig
 	public $include_episodes = true;
 	public $group_membership_prop = 179;
 	public $group_position_qualifier = 1545;
+	public $group_subgroup_prop = 4908; # season
 	public $episode_type_qs = [21191270]; # television series episode
 	public $episode_sparql = [
 		# Public-domain TV episodes with playable media. The structural

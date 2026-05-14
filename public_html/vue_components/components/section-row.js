@@ -6,9 +6,10 @@
  *   - `entries`: bare array of entries (used by search results)
  *
  * Heading link target:
- *   - section.q present       → /section/<q>[/<prop>]
- *   - section.key present     → /special/<key>            (pseudo-section)
- *   - neither / nolink="1"    → unlinked text
+ *   - section.q present                       → /section/<q>[/<prop>]
+ *   - section.q + link_prefix="/group/"       → /group/<q>           (override)
+ *   - section.key present                     → /special/<key>       (pseudo-section)
+ *   - neither / nolink="1"                    → unlinked text
  *
  * `multi_row` switches from horizontal scroller to wrapped grid.
  */
@@ -18,13 +19,16 @@ import { ttMixin } from '../../resources/vue_es6/state.js';
 export default {
     name: 'SectionRow',
     mixins: [ttMixin],
-    props: ['section', 'nolink', 'multi_row', 'entries'],
+    props: ['section', 'nolink', 'multi_row', 'entries', 'link_prefix'],
     computed: {
         link_target() {
             if (this.nolink) return null;
             const s = this.section;
             if (!s) return null;
             if (typeof s.q !== 'undefined') {
+                if (this.link_prefix) {
+                    return this.link_prefix + s.q;
+                }
                 return typeof s.prop !== 'undefined'
                     ? '/section/' + s.q + '/' + (s.prop || '')
                     : '/section/' + s.q;

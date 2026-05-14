@@ -118,6 +118,9 @@ if ( $action=='get_entry' ) {
 } else if ( $action=='get_person' ) {
 	$q = $ws->tfc->getRequest('q',0)*1;
 	$out['data'] = $ws->getPerson($q);
+} else if ( $action=='get_group' ) {
+	$q = preg_replace('|\D|','',$ws->tfc->getRequest('q',0))*1;
+	$out['data'] = $ws->getGroup($q);
 } else if ( $action=='get_items_by_year' ) {
 	$year = $ws->tfc->getRequest('year','50')*1;
 	$out['data'] = $ws->get_items_by_year($year);
@@ -143,6 +146,7 @@ if ( $action=='get_entry' ) {
 # - State-changing / per-user-write / randomised / log endpoints are never
 #   cached.
 $public_cacheable  = [ 'get_all_sections', 'get_section', 'get_person',
+                       'get_group',
                        'get_items_by_year', 'get_candidate_items', 'search',
                        'get_special' ];
 $private_cacheable = [ 'get_entry' ];

@@ -789,22 +789,25 @@ final class WikiStreamTest extends TestCase
     /**
      * A WikidataItem stub whose getClaims(P-prop) returns the supplied
      * claim list and whose getTarget() returns the mainsnak target Q-id.
+     * $extraClaims is a map of property-number → claim list, used to add
+     * P4908 (season) etc. without making a brand-new fake item class.
      */
-    private function makeGroupItem(int $q, array $p179Claims): \WikidataItem
+    private function makeGroupItem(int $q, array $p179Claims, array $extraClaims = []): \WikidataItem
     {
         $j = new \stdClass();
         $j->id = "Q{$q}";
-        return new class($j, $p179Claims) extends \WikidataItem {
-            private array $p179;
-            public function __construct(object $j, array $p179)
+        $byProp = $extraClaims + [179 => $p179Claims];
+        return new class($j, $byProp) extends \WikidataItem {
+            private array $byProp;
+            public function __construct(object $j, array $byProp)
             {
                 parent::__construct($j);
-                $this->p179 = $p179;
+                $this->byProp = $byProp;
             }
             public function getClaims(string|int $prop): array
             {
                 $key = (int) preg_replace('/\D/', '', (string) $prop);
-                return $key === 179 ? $this->p179 : [];
+                return $this->byProp[$key] ?? [];
             }
             public function getTarget(object $claim): string
             {
@@ -844,7 +847,7 @@ final class WikiStreamTest extends TestCase
         $rows = $this->invokeExtractGroupItemRows($ws, $item, 42);
 
         $this->assertSame(
-            ['(100,42,NULL)', '(200,42,NULL)'],
+            ['(100,42,NULL,NULL)', '(200,42,NULL,NULL)'],
             $rows,
         );
     }
@@ -857,7 +860,7 @@ final class WikiStreamTest extends TestCase
 
         $rows = $this->invokeExtractGroupItemRows($ws, $item, 42);
 
-        $this->assertSame(['(100,42,7.00)'], $rows);
+        $this->assertSame(['(100,42,7.00,NULL)'], $rows);
     }
 
     public function test_extract_group_item_rows_drops_non_numeric_ordinal(): void
@@ -868,7 +871,7 @@ final class WikiStreamTest extends TestCase
 
         $rows = $this->invokeExtractGroupItemRows($ws, $item, 42);
 
-        $this->assertSame(['(100,42,NULL)'], $rows);
+        $this->assertSame(['(100,42,NULL,NULL)'], $rows);
     }
 
     public function test_extract_group_item_rows_skips_deprecated_claims(): void
@@ -882,7 +885,78 @@ final class WikiStreamTest extends TestCase
 
         $rows = $this->invokeExtractGroupItemRows($ws, $item, 42);
 
-        $this->assertSame(['(200,42,NULL)'], $rows);
+        $this->assertSame(['(200,42,NULL,NULL)'], $rows);
+    }
+
+    public function test_extract_group_item_rows_picks_up_subgroup_q_from_p4908(): void
+    {
+        // WikiFlix config has group_subgroup_prop = 4908 (season).
+        [$ws] = $this->makeWikiStream();
+
+        $item = $this->makeGroupItem(
+            42,
+            [$this->makeGroupClaim('Q100', '7')],
+            [4908 => [$this->makeGroupClaim('Q999')]],
+        );
+
+        $rows = $this->invokeExtractGroupItemRows($ws, $item, 42);
+
+        // subgroup stored as bare numeric string '999'
+        $this->assertSame(["(100,42,7.00,'999')"], $rows);
+    }
+
+    public function test_extract_group_item_rows_applies_subgroup_to_every_group_row(): void
+    {
+        // Same season Q applies even when the item has multiple series claims.
+        [$ws] = $this->makeWikiStream();
+
+        $item = $this->makeGroupItem(
+            42,
+            [$this->makeGroupClaim('Q100'), $this->makeGroupClaim('Q200')],
+            [4908 => [$this->makeGroupClaim('Q999')]],
+        );
+
+        $rows = $this->invokeExtractGroupItemRows($ws, $item, 42);
+
+        $this->assertSame(
+            ["(100,42,NULL,'999')", "(200,42,NULL,'999')"],
+            $rows,
+        );
+    }
+
+    public function test_extract_group_item_rows_emits_null_subgroup_when_prop_disabled(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $config->group_subgroup_prop = 0;
+        [$ws] = $this->makeWikiStream(config: $config);
+
+        $item = $this->makeGroupItem(
+            42,
+            [$this->makeGroupClaim('Q100')],
+            [4908 => [$this->makeGroupClaim('Q999')]],
+        );
+
+        $rows = $this->invokeExtractGroupItemRows($ws, $item, 42);
+
+        $this->assertSame(['(100,42,NULL,NULL)'], $rows);
+    }
+
+    public function test_extract_group_item_rows_skips_deprecated_subgroup_claim(): void
+    {
+        [$ws] = $this->makeWikiStream();
+
+        $item = $this->makeGroupItem(
+            42,
+            [$this->makeGroupClaim('Q100')],
+            [4908 => [
+                $this->makeGroupClaim('Q500', null, 'deprecated'),
+                $this->makeGroupClaim('Q777'),
+            ]],
+        );
+
+        $rows = $this->invokeExtractGroupItemRows($ws, $item, 42);
+
+        $this->assertSame(["(100,42,NULL,'777')"], $rows);
     }
 
     /**
@@ -976,7 +1050,7 @@ final class WikiStreamTest extends TestCase
         $this->assertStringContainsString('SELECT `q` FROM `item`', $captured[0]);
         $this->assertStringContainsString('DELETE FROM `group_item` WHERE `item_q` IN (42,43)', $joined);
         $this->assertStringContainsString(
-            "INSERT IGNORE INTO `group_item` (`group_q`,`item_q`,`position`) VALUES (100,42,3.00),(100,43,NULL)",
+            "INSERT IGNORE INTO `group_item` (`group_q`,`item_q`,`position`,`subgroup`) VALUES (100,42,3.00,NULL),(100,43,NULL,NULL)",
             $joined,
         );
     }
@@ -1046,6 +1120,196 @@ final class WikiStreamTest extends TestCase
             fn(string $s) => str_starts_with($s, 'DELETE FROM `group_item`'),
         );
         $this->assertCount(2, $deletes);
+    }
+
+    // ------------------------------------------------------------------
+    // getGroup() — group metadata + items, optionally split by subgroup
+    // (season for TV series).
+    // ------------------------------------------------------------------
+
+    /**
+     * Build a row as `SELECT * FROM group` produces — group metadata.
+     */
+    private function groupMetaRow(int $q, string $title, ?int $year = null, ?string $image = null, ?int $type_q = null): \stdClass
+    {
+        $row = new \stdClass();
+        $row->q      = $q;
+        $row->title  = $title;
+        $row->type_q = $type_q;
+        $row->image  = $image;
+        $row->year   = $year;
+        $row->ts     = '20260514000000';
+        return $row;
+    }
+
+    /**
+     * Build a row as the items-in-group join produces.
+     */
+    private function groupEntryRow(int $q, string $title, $position, $subgroup): \stdClass
+    {
+        $row = new \stdClass();
+        $row->q              = $q;
+        $row->title          = $title;
+        $row->image          = null;
+        $row->year           = null;
+        $row->minutes        = null;
+        $row->sites          = 1;
+        $row->ts             = '20260514000000';
+        $row->ts_added       = '2026-05-14 00:00:00';
+        $row->primary_type_q = 21191270;
+        $row->files          = '[]';
+        $row->is_silent      = 0;
+        $row->group_position = $position;
+        $row->group_subgroup = $subgroup;
+        return $row;
+    }
+
+    public function test_getGroup_returns_null_for_invalid_q(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->expects($this->never())->method('getSQL');
+
+        $this->assertNull($ws->getGroup(0));
+        $this->assertNull($ws->getGroup(-1));
+    }
+
+    public function test_getGroup_returns_null_when_group_not_in_db(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = [];
+        $this->stubSqlSequence($tfc, [$this->emptyResult()], $captured);
+
+        $this->assertNull($ws->getGroup(12060736));
+        // Second query must not fire once we've decided the group is unknown.
+        $this->assertCount(1, $captured);
+    }
+
+    public function test_getGroup_returns_metadata_with_empty_entries_when_no_items_match(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = [];
+        $this->stubSqlSequence(
+            $tfc,
+            [
+                $this->makeResult([$this->groupMetaRow(12060736, 'Industry on Parade', 1951)]),
+                $this->emptyResult(), // no items in this group survive vw_ranked_entries
+            ],
+            $captured,
+        );
+
+        $g = $ws->getGroup(12060736);
+
+        $this->assertNotNull($g);
+        $this->assertSame(12060736, $g->q);
+        $this->assertSame('Industry on Parade', $g->title);
+        $this->assertSame(1951, (int) $g->year);
+        $this->assertSame([], $g->entries);
+        $this->assertSame([], $g->subgroups);
+    }
+
+    public function test_getGroup_groups_entries_by_subgroup_and_loads_subgroup_metadata(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = [];
+        $this->stubSqlSequence(
+            $tfc,
+            [
+                $this->makeResult([$this->groupMetaRow(3651068, 'Calvin and the Colonel')]),
+                $this->makeResult([
+                    $this->groupEntryRow(111151773, 'Ep1', 1, '112174548'),
+                    $this->groupEntryRow(111151926, 'Ep2', 2, '112174548'),
+                    $this->groupEntryRow(200000000, 'Ep20', 1, '112174549'),
+                ]),
+                $this->makeResult([
+                    $this->groupMetaRow(112174548, 'Season 1', 1961),
+                    $this->groupMetaRow(112174549, 'Season 2', 1962),
+                ]),
+            ],
+            $captured,
+        );
+
+        $g = $ws->getGroup(3651068);
+
+        $this->assertNotNull($g);
+        $this->assertSame([], $g->entries, 'all entries had a subgroup');
+        $this->assertCount(2, $g->subgroups);
+        $this->assertSame(112174548, $g->subgroups[0]->q);
+        $this->assertSame('Season 1', $g->subgroups[0]->title);
+        $this->assertCount(2, $g->subgroups[0]->entries);
+        $this->assertSame(111151773, (int) $g->subgroups[0]->entries[0]->q);
+
+        $this->assertSame(112174549, $g->subgroups[1]->q);
+        $this->assertSame('Season 2', $g->subgroups[1]->title);
+        $this->assertCount(1, $g->subgroups[1]->entries);
+        $this->assertSame(200000000, (int) $g->subgroups[1]->entries[0]->q);
+    }
+
+    public function test_getGroup_puts_subgroupless_entries_in_top_level_entries(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = [];
+        $this->stubSqlSequence(
+            $tfc,
+            [
+                $this->makeResult([$this->groupMetaRow(100, 'Series A')]),
+                $this->makeResult([
+                    $this->groupEntryRow(11, 'Ep1', 1, null),
+                    $this->groupEntryRow(12, 'Ep2', 2, '300'),
+                ]),
+                $this->makeResult([$this->groupMetaRow(300, 'Season 1')]),
+            ],
+            $captured,
+        );
+
+        $g = $ws->getGroup(100);
+
+        $this->assertCount(1, $g->entries);
+        $this->assertSame(11, (int) $g->entries[0]->q);
+        $this->assertCount(1, $g->subgroups);
+        $this->assertSame(300, $g->subgroups[0]->q);
+        $this->assertCount(1, $g->subgroups[0]->entries);
+    }
+
+    public function test_getGroup_falls_back_to_empty_title_for_missing_subgroup_metadata(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = [];
+        $this->stubSqlSequence(
+            $tfc,
+            [
+                $this->makeResult([$this->groupMetaRow(100, 'Series A')]),
+                $this->makeResult([$this->groupEntryRow(11, 'Ep1', 1, '999')]),
+                $this->emptyResult(), // subgroup 999 not yet in `group` table
+            ],
+            $captured,
+        );
+
+        $g = $ws->getGroup(100);
+
+        $this->assertCount(1, $g->subgroups);
+        $this->assertSame(999, $g->subgroups[0]->q);
+        $this->assertSame('', $g->subgroups[0]->title);
+        $this->assertCount(1, $g->subgroups[0]->entries);
+    }
+
+    public function test_getGroup_strips_join_only_fields_from_entries(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = [];
+        $this->stubSqlSequence(
+            $tfc,
+            [
+                $this->makeResult([$this->groupMetaRow(100, 'Series A')]),
+                $this->makeResult([$this->groupEntryRow(11, 'Ep1', 1, '300')]),
+                $this->makeResult([$this->groupMetaRow(300, 'Season 1')]),
+            ],
+            $captured,
+        );
+
+        $g = $ws->getGroup(100);
+        $entry = $g->subgroups[0]->entries[0];
+        $this->assertObjectNotHasProperty('group_position', $entry);
+        $this->assertObjectNotHasProperty('group_subgroup', $entry);
     }
 
     // ------------------------------------------------------------------
@@ -2304,10 +2568,10 @@ final class WikiStreamTest extends TestCase
 
         $this->assertCount(1, $out['group_items'], 'one P179 → one group_item row');
         $tuple = $out['group_items'][0];
-        // Tuple format: (group_q, item_q, position-or-NULL)
+        // Tuple format: (group_q, item_q, position-or-NULL, subgroup-or-NULL)
         $this->assertStringContainsString('484020',  $tuple);
         $this->assertStringContainsString('5583524', $tuple);
-        $this->assertMatchesRegularExpression('/,\s*13(\.0+)?\)$/', $tuple);
+        $this->assertMatchesRegularExpression('/,\s*13(\.0+)?,\s*NULL\)$/', $tuple);
     }
 
     public function test_add_item_details_group_item_position_null_for_non_numeric_ordinal(): void

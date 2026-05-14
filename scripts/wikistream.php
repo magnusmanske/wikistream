@@ -117,6 +117,108 @@ class WikiStream
 		$this->httpClient = $httpClient ?? new CurlHttpClient();
 	}
 
+	/**
+	 * Return metadata for a group (series, franchise, …) plus all items
+	 * that belong to it. Items are split by `subgroup` (season for TV
+	 * series); items with NULL subgroup land in the top-level `entries`
+	 * list. Returns null when the group doesn't exist in our DB.
+	 *
+	 * Output shape (mirrors what <entry-thumb> consumes for entries):
+	 *   {
+	 *     q, title, year, image, type_q, ts,
+	 *     entries: [...],                          // ungrouped items
+	 *     subgroups: [                              // ordered by min position
+	 *       { q, title, year, image, type_q, entries: [...] },
+	 *       ...
+	 *     ]
+	 *   }
+	 */
+	public function getGroup($q): ?object
+	{
+		$q = (int) $q;
+		if ($q <= 0) {
+			return null;
+		}
+
+		// 1. Group metadata. NULL row means the group_q is unknown to us.
+		$sql = "SELECT * FROM `group` WHERE `q`={$q}";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		$ret = null;
+		if ($o = $result->fetch_object()) {
+			$ret = $o;
+		}
+		$this->freeResult($result);
+		if ($ret === null) {
+			return null;
+		}
+		$ret->q = (int) $ret->q;
+		$ret->entries = [];
+		$ret->subgroups = [];
+
+		// 2. Items belonging to this group + their position/subgroup,
+		//    INNER JOIN with vw_ranked_entries so we only return items
+		//    that have media (can be thumbnailed).
+		$sql =
+			"SELECT vr.*, gi.`position` AS `group_position`, " .
+			"gi.`subgroup` AS `group_subgroup` " .
+			"FROM `group_item` gi " .
+			"JOIN `vw_ranked_entries` vr ON vr.`q`=gi.`item_q` " .
+			"WHERE gi.`group_q`={$q} " .
+			"ORDER BY gi.`position` IS NULL, gi.`position`, gi.`item_q`";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		$bySubgroup = [];          // subgroup_q (int) → list<entry>
+		$subgroupOrder = [];       // preserves first-seen order
+		while ($o = $result->fetch_object()) {
+			$subgroup_raw = $o->group_subgroup;
+			unset($o->group_position, $o->group_subgroup);
+			$this->fix_item_image($o);
+			if ($subgroup_raw === null || $subgroup_raw === "") {
+				$ret->entries[] = $o;
+				continue;
+			}
+			$sg_q = (int) $subgroup_raw;
+			if ($sg_q <= 0) {
+				$ret->entries[] = $o;
+				continue;
+			}
+			if (!isset($bySubgroup[$sg_q])) {
+				$bySubgroup[$sg_q] = [];
+				$subgroupOrder[] = $sg_q;
+			}
+			$bySubgroup[$sg_q][] = $o;
+		}
+		$this->freeResult($result);
+
+		if (empty($subgroupOrder)) {
+			return $ret;
+		}
+
+		// 3. Subgroup metadata in one round trip.
+		$sgList = implode(",", $subgroupOrder);
+		$sql = "SELECT * FROM `group` WHERE `q` IN ({$sgList})";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		$sgMeta = [];
+		while ($o = $result->fetch_object()) {
+			$sgMeta[(int) $o->q] = $o;
+		}
+		$this->freeResult($result);
+
+		foreach ($subgroupOrder as $sg_q) {
+			$meta = $sgMeta[$sg_q] ?? (object) [
+				"q"      => $sg_q,
+				"title"  => "",
+				"type_q" => null,
+				"image"  => null,
+				"year"   => null,
+			];
+			$meta->q = (int) $meta->q;
+			$meta->entries = $bySubgroup[$sg_q];
+			$ret->subgroups[] = $meta;
+		}
+
+		return $ret;
+	}
+
 	public function getPerson($q, $add_files = true): object
 	{
 		$ret = (object) ["q" => $q, "entries" => []];
@@ -793,7 +895,7 @@ class WikiStream
 
 			if (count($group_items) > 0) {
 				$sql =
-					"INSERT IGNORE INTO `group_item` (`group_q`,`item_q`,`position`) VALUES " .
+					"INSERT IGNORE INTO `group_item` (`group_q`,`item_q`,`position`,`subgroup`) VALUES " .
 					implode(",", $group_items);
 				$this->tfc->getSQL($this->db, $sql);
 			}
@@ -815,11 +917,20 @@ class WikiStream
 	/**
 	 * Build the SQL VALUES rows for `group_item` from an item's
 	 * $config->group_membership_prop claims, reading the optional
-	 * $config->group_position_qualifier qualifier for the ordinal.
+	 * $config->group_position_qualifier qualifier for the ordinal and
+	 * the optional $config->group_subgroup_prop claim for a sub-grouping
+	 * Q-number (e.g. season for TV episodes).
 	 *
 	 * Non-numeric ordinals (e.g. "S01E13") yield a NULL position. The
 	 * position column is decimal(8,2), so absurdly large numeric values
 	 * are dropped to NULL rather than silently clamped by MariaDB.
+	 *
+	 * Subgroup: stored as the bare numeric Q-id string (no "Q" prefix)
+	 * in `group_item.subgroup`. The first non-deprecated subgroup claim
+	 * wins, and it's applied to every group row for this item — items
+	 * typically have a single season even when they belong to multiple
+	 * series. NULL when no subgroup property is configured or the item
+	 * has no subgroup claim.
 	 *
 	 * Returns [] when group ingestion isn't configured or the item has
 	 * no qualifying claims.
@@ -833,6 +944,7 @@ class WikiStream
 		}
 		$gprop = (int) $this->config->group_membership_prop;
 		$qual_prop = (int) $this->config->group_position_qualifier;
+		$subgroup_sql = $this->derive_subgroup_sql($item);
 		$rows = [];
 		foreach ($item->getClaims($gprop) as $claim) {
 			if (isset($claim->rank) && $claim->rank === "deprecated") {
@@ -862,9 +974,33 @@ class WikiStream
 					}
 				}
 			}
-			$rows[] = "({$group_q_numeric},{$item_q_numeric},{$position_sql})";
+			$rows[] = "({$group_q_numeric},{$item_q_numeric},{$position_sql},{$subgroup_sql})";
 		}
 		return $rows;
+	}
+
+	/**
+	 * Read the configured subgroup property (e.g. P4908 season) from an
+	 * item and return a SQL fragment for INSERT — either NULL or a
+	 * single-quoted numeric Q-id string. Deprecated claims are skipped.
+	 */
+	protected function derive_subgroup_sql($item): string
+	{
+		if (empty($this->config->group_subgroup_prop)) {
+			return "NULL";
+		}
+		$sgprop = (int) $this->config->group_subgroup_prop;
+		foreach ($item->getClaims($sgprop) as $claim) {
+			if (isset($claim->rank) && $claim->rank === "deprecated") {
+				continue;
+			}
+			$target_q = $item->getTarget($claim);
+			$num = (int) preg_replace("/\D/", "", (string) $target_q);
+			if ($num > 0) {
+				return "'{$num}'";
+			}
+		}
+		return "NULL";
 	}
 
 	/**
@@ -1195,9 +1331,17 @@ class WikiStream
 	 */
 	public function import_missing_groups(): void
 	{
+		// Pick up every Q referenced from `group_item`, whether as the
+		// series (group_q) or as a subgroup (season, etc.) — both need
+		// metadata in the `group` table for the frontend to render them.
 		$sql =
-			"SELECT DISTINCT `group_q` AS `q` FROM `group_item` " .
-			"WHERE NOT EXISTS (SELECT 1 FROM `group` WHERE `group`.`q` = `group_item`.`group_q`)";
+			"SELECT DISTINCT `q` FROM (" .
+			"  SELECT `group_q` AS `q` FROM `group_item`" .
+			"  UNION" .
+			"  SELECT CAST(`subgroup` AS UNSIGNED) AS `q` FROM `group_item`" .
+			"    WHERE `subgroup` IS NOT NULL AND `subgroup` REGEXP '^[0-9]+\$'" .
+			") AS `refs` " .
+			"WHERE `q` > 0 AND NOT EXISTS (SELECT 1 FROM `group` WHERE `group`.`q` = `refs`.`q`)";
 		$result = $this->tfc->getSQL($this->db, $sql);
 		$qs = [];
 		while ($o = $result->fetch_object()) {
@@ -1314,7 +1458,7 @@ class WikiStream
 				$this->tfc->getSQL($this->db, $sql);
 				if (!empty($group_items)) {
 					$sql =
-						"INSERT IGNORE INTO `group_item` (`group_q`,`item_q`,`position`) VALUES " .
+						"INSERT IGNORE INTO `group_item` (`group_q`,`item_q`,`position`,`subgroup`) VALUES " .
 						implode(",", $group_items);
 					$this->tfc->getSQL($this->db, $sql);
 				}

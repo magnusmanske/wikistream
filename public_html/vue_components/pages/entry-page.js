@@ -333,7 +333,7 @@ export default {
                         </div>
                     </div>
                     <div v-if="(entry.groups||[]).length>0" style="clear: both; width: 100%;">
-                        <section-row v-for="g in entry.groups" :key="'group-'+g.q" :section="g" nolink="1"></section-row>
+                        <section-row v-for="g in entry.groups" :key="'group-'+g.q" :section="g" link_prefix="/group/"></section-row>
                     </div>
                     <div style="width: 100%">
                         <section-row v-for="section in entry.sections" :key="section.title" :section="section"></section-row>
