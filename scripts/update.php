@@ -23,6 +23,7 @@ match ($cmd) {
 	'person'                    => $ws->update_persons(),
 	'sec_labels'                => $ws->import_missing_section_labels(),
 	'groups'                    => $ws->import_missing_groups(),
+	'backfill_group_items'      => $ws->backfill_group_items(),
 	'purge_items_without_files' => $ws->purge_items_without_files(),
 	'annotate_ia_movies'        => $ws->annotate_ia_movies(),
 	'annotate_pre_1900_public_domain' => $ws->annotate_pre_1900_public_domain(),

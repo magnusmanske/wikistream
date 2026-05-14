@@ -667,6 +667,294 @@ final class WikiStreamTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // extract_group_item_rows() — group_membership claim → VALUES row.
+    // backfill_group_items() — rebuild group_item for every item.
+    // ------------------------------------------------------------------
+
+    /**
+     * Build a P179-style claim returning $targetQ, with an optional
+     * P1545 ordinal qualifier.
+     */
+    private function makeGroupClaim(string $targetQ, ?string $ordinal = null, ?string $rank = null): \stdClass
+    {
+        $claim = new \stdClass();
+        $claim->mainsnak = (object) [
+            'datavalue' => (object) ['value' => (object) ['id' => $targetQ]],
+        ];
+        if ($rank !== null) {
+            $claim->rank = $rank;
+        }
+        if ($ordinal !== null) {
+            $qual = new \stdClass();
+            $qual->datavalue = (object) ['value' => $ordinal];
+            $claim->qualifiers = (object) ['P1545' => [$qual]];
+        }
+        return $claim;
+    }
+
+    /**
+     * A WikidataItem stub whose getClaims(P-prop) returns the supplied
+     * claim list and whose getTarget() returns the mainsnak target Q-id.
+     */
+    private function makeGroupItem(int $q, array $p179Claims): \WikidataItem
+    {
+        $j = new \stdClass();
+        $j->id = "Q{$q}";
+        return new class($j, $p179Claims) extends \WikidataItem {
+            private array $p179;
+            public function __construct(object $j, array $p179)
+            {
+                parent::__construct($j);
+                $this->p179 = $p179;
+            }
+            public function getClaims(string|int $prop): array
+            {
+                $key = (int) preg_replace('/\D/', '', (string) $prop);
+                return $key === 179 ? $this->p179 : [];
+            }
+            public function getTarget(object $claim): string
+            {
+                return $claim->mainsnak->datavalue->value->id ?? '';
+            }
+        };
+    }
+
+    /**
+     * Invoke the protected extract_group_item_rows() helper.
+     */
+    private function invokeExtractGroupItemRows(\WikiStream $ws, \WikidataItem $item, int $q): array
+    {
+        $m = new ReflectionMethod($ws, 'extract_group_item_rows');
+        return $m->invoke($ws, $item, $q);
+    }
+
+    public function test_extract_group_item_rows_returns_empty_when_no_membership_prop_configured(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $config->group_membership_prop = 0;
+        [$ws] = $this->makeWikiStream(config: $config);
+
+        $item = $this->makeGroupItem(42, [$this->makeGroupClaim('Q100')]);
+        $this->assertSame([], $this->invokeExtractGroupItemRows($ws, $item, 42));
+    }
+
+    public function test_extract_group_item_rows_emits_one_row_per_claim_with_null_position(): void
+    {
+        [$ws] = $this->makeWikiStream();
+
+        $item = $this->makeGroupItem(42, [
+            $this->makeGroupClaim('Q100'),
+            $this->makeGroupClaim('Q200'),
+        ]);
+
+        $rows = $this->invokeExtractGroupItemRows($ws, $item, 42);
+
+        $this->assertSame(
+            ['(100,42,NULL)', '(200,42,NULL)'],
+            $rows,
+        );
+    }
+
+    public function test_extract_group_item_rows_parses_numeric_ordinal_qualifier(): void
+    {
+        [$ws] = $this->makeWikiStream();
+
+        $item = $this->makeGroupItem(42, [$this->makeGroupClaim('Q100', '7')]);
+
+        $rows = $this->invokeExtractGroupItemRows($ws, $item, 42);
+
+        $this->assertSame(['(100,42,7.00)'], $rows);
+    }
+
+    public function test_extract_group_item_rows_drops_non_numeric_ordinal(): void
+    {
+        [$ws] = $this->makeWikiStream();
+
+        $item = $this->makeGroupItem(42, [$this->makeGroupClaim('Q100', 'S01E13')]);
+
+        $rows = $this->invokeExtractGroupItemRows($ws, $item, 42);
+
+        $this->assertSame(['(100,42,NULL)'], $rows);
+    }
+
+    public function test_extract_group_item_rows_skips_deprecated_claims(): void
+    {
+        [$ws] = $this->makeWikiStream();
+
+        $item = $this->makeGroupItem(42, [
+            $this->makeGroupClaim('Q100', null, 'deprecated'),
+            $this->makeGroupClaim('Q200'),
+        ]);
+
+        $rows = $this->invokeExtractGroupItemRows($ws, $item, 42);
+
+        $this->assertSame(['(200,42,NULL)'], $rows);
+    }
+
+    /**
+     * Build a WikiStream subclass whose loadWikidataItemList() returns a
+     * pre-populated WikidataItemList, so backfill_group_items can be
+     * driven without hitting the network.
+     */
+    private function makeBackfillWikiStream(\WikidataItemList $wil, \ToolforgeCommon $tfc): \WikiStream
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        return new class($config, $tfc, null, $wil) extends \WikiStream {
+            private \WikidataItemList $injectedWil;
+            public function __construct($config, $tfc, $http, \WikidataItemList $wil)
+            {
+                parent::__construct($config, $tfc, $http);
+                $this->injectedWil = $wil;
+            }
+            protected function loadWikidataItemList(array $qs): \WikidataItemList
+            {
+                unset($qs);
+                return $this->injectedWil;
+            }
+        };
+    }
+
+    public function test_backfill_group_items_noop_when_membership_prop_disabled(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $config->group_membership_prop = 0;
+        [$ws, $tfc] = $this->makeWikiStream(config: $config);
+        $tfc->expects($this->never())->method('getSQL');
+
+        $ws->backfill_group_items();
+    }
+
+    public function test_backfill_group_items_noop_when_item_table_empty(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+
+        $captured = [];
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
+                $captured[] = $sql;
+                return $this->emptyResult();
+            });
+
+        $wil = new \WikidataItemList();
+        $ws = $this->makeBackfillWikiStream($wil, $tfc);
+        $ws->backfill_group_items();
+
+        $this->assertNotEmpty($captured);
+        $this->assertStringContainsString('SELECT `q` FROM `item`', $captured[0]);
+        foreach ($captured as $sql) {
+            $this->assertStringNotContainsString('INSERT', $sql);
+        }
+    }
+
+    public function test_backfill_group_items_writes_delete_then_insert_for_chunk(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+
+        $itemListRows = [
+            (object) ['q' => 42],
+            (object) ['q' => 43],
+        ];
+        $captured = [];
+        $callCount = 0;
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured, &$callCount, $itemListRows) {
+                $captured[] = $sql;
+                $callCount++;
+                if ($callCount === 1) {
+                    return $this->makeResult($itemListRows);
+                }
+                return $this->emptyResult();
+            });
+
+        $wil = new \WikidataItemList();
+        $wil->setItem(42, $this->makeGroupItem(42, [$this->makeGroupClaim('Q100', '3')]));
+        $wil->setItem(43, $this->makeGroupItem(43, [$this->makeGroupClaim('Q100')]));
+
+        $ws = $this->makeBackfillWikiStream($wil, $tfc);
+        $ws->backfill_group_items();
+
+        $joined = implode("\n", $captured);
+        // Walk: SELECT, START TRANSACTION, DELETE, INSERT, COMMIT, (then import_missing_groups SELECT)
+        $this->assertStringContainsString('SELECT `q` FROM `item`', $captured[0]);
+        $this->assertStringContainsString('DELETE FROM `group_item` WHERE `item_q` IN (42,43)', $joined);
+        $this->assertStringContainsString(
+            "INSERT IGNORE INTO `group_item` (`group_q`,`item_q`,`position`) VALUES (100,42,3.00),(100,43,NULL)",
+            $joined,
+        );
+    }
+
+    public function test_backfill_group_items_skips_insert_when_chunk_has_no_claims(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+
+        $itemListRows = [(object) ['q' => 42]];
+        $captured = [];
+        $callCount = 0;
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured, &$callCount, $itemListRows) {
+                $captured[] = $sql;
+                $callCount++;
+                if ($callCount === 1) {
+                    return $this->makeResult($itemListRows);
+                }
+                return $this->emptyResult();
+            });
+
+        $wil = new \WikidataItemList();
+        // No P179 claims — extract returns []
+        $wil->setItem(42, $this->makeGroupItem(42, []));
+
+        $ws = $this->makeBackfillWikiStream($wil, $tfc);
+        $ws->backfill_group_items();
+
+        // DELETE still runs (clears stale rows), INSERT does not.
+        $joined = implode("\n", $captured);
+        $this->assertStringContainsString('DELETE FROM `group_item` WHERE `item_q` IN (42)', $joined);
+        $this->assertStringNotContainsString('INSERT IGNORE INTO `group_item`', $joined);
+    }
+
+    public function test_backfill_group_items_chunks_at_50_items(): void
+    {
+        $db = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+
+        // 75 items → 50 in chunk 1, 25 in chunk 2 → two DELETEs.
+        $itemListRows = [];
+        for ($i = 1; $i <= 75; $i++) {
+            $itemListRows[] = (object) ['q' => $i];
+        }
+        $captured = [];
+        $callCount = 0;
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured, &$callCount, $itemListRows) {
+                $captured[] = $sql;
+                $callCount++;
+                if ($callCount === 1) {
+                    return $this->makeResult($itemListRows);
+                }
+                return $this->emptyResult();
+            });
+
+        $wil = new \WikidataItemList(); // no items pre-populated — extract returns []
+
+        $ws = $this->makeBackfillWikiStream($wil, $tfc);
+        $ws->backfill_group_items();
+
+        $deletes = array_filter(
+            $captured,
+            fn(string $s) => str_starts_with($s, 'DELETE FROM `group_item`'),
+        );
+        $this->assertCount(2, $deletes);
+    }
+
+    // ------------------------------------------------------------------
     // get_total_candidate_items() returns the integer total from the DB.
     // ------------------------------------------------------------------
 

@@ -578,46 +578,10 @@ class WikiStream
 
 		# Group membership: emit (group_q, item_q, position) tuples for
 		# each $group_membership_prop claim, reading the optional
-		# $group_position_qualifier value. Non-numeric ordinals (e.g.
-		# "S01E13") yield NULL position — the value is preserved as-is
-		# only if it parses as a number.
-		if (
-			is_array($group_items)
-			&& !empty($this->config->group_membership_prop)
-		) {
-			$gprop = (int) $this->config->group_membership_prop;
-			$qual_prop = (int) $this->config->group_position_qualifier;
-			foreach ($item->getClaims($gprop) as $claim) {
-				if (isset($claim->rank) && $claim->rank === "deprecated") {
-					continue;
-				}
-				$target_q = $item->getTarget($claim);
-				$group_q_numeric = (int) preg_replace("/\D/", "", (string) $target_q);
-				if ($group_q_numeric <= 0) {
-					continue;
-				}
-				$position_sql = "NULL";
-				if ($qual_prop > 0 && isset($claim->qualifiers)) {
-					$qual_key = "P{$qual_prop}";
-					if (isset($claim->qualifiers->$qual_key)) {
-						foreach ($claim->qualifiers->$qual_key as $qual) {
-							if (!isset($qual->datavalue->value)) {
-								continue;
-							}
-							$raw = $qual->datavalue->value;
-							if (is_numeric($raw)) {
-								// decimal(8,2): cap to avoid silent
-								// MariaDB clamp on absurd values
-								$num = (float) $raw;
-								if (abs($num) < 1e6) {
-									$position_sql = number_format($num, 2, '.', '');
-									break;
-								}
-							}
-						}
-					}
-				}
-				$group_items[] = "({$group_q_numeric},{$item_q_numeric},{$position_sql})";
+		# $group_position_qualifier value.
+		if (is_array($group_items)) {
+			foreach ($this->extract_group_item_rows($item, $item_q_numeric) as $row) {
+				$group_items[] = $row;
 			}
 		}
 		# Files
@@ -820,6 +784,61 @@ class WikiStream
 			$this->rollback();
 			throw $e;
 		}
+	}
+
+	/**
+	 * Build the SQL VALUES rows for `group_item` from an item's
+	 * $config->group_membership_prop claims, reading the optional
+	 * $config->group_position_qualifier qualifier for the ordinal.
+	 *
+	 * Non-numeric ordinals (e.g. "S01E13") yield a NULL position. The
+	 * position column is decimal(8,2), so absurdly large numeric values
+	 * are dropped to NULL rather than silently clamped by MariaDB.
+	 *
+	 * Returns [] when group ingestion isn't configured or the item has
+	 * no qualifying claims.
+	 *
+	 * @return list<string>
+	 */
+	protected function extract_group_item_rows($item, int $item_q_numeric): array
+	{
+		if (empty($this->config->group_membership_prop)) {
+			return [];
+		}
+		$gprop = (int) $this->config->group_membership_prop;
+		$qual_prop = (int) $this->config->group_position_qualifier;
+		$rows = [];
+		foreach ($item->getClaims($gprop) as $claim) {
+			if (isset($claim->rank) && $claim->rank === "deprecated") {
+				continue;
+			}
+			$target_q = $item->getTarget($claim);
+			$group_q_numeric = (int) preg_replace("/\D/", "", (string) $target_q);
+			if ($group_q_numeric <= 0) {
+				continue;
+			}
+			$position_sql = "NULL";
+			if ($qual_prop > 0 && isset($claim->qualifiers)) {
+				$qual_key = "P{$qual_prop}";
+				if (isset($claim->qualifiers->$qual_key)) {
+					foreach ($claim->qualifiers->$qual_key as $qual) {
+						if (!isset($qual->datavalue->value)) {
+							continue;
+						}
+						$raw = $qual->datavalue->value;
+						if (is_numeric($raw)) {
+							$num = (float) $raw;
+							if (abs($num) < 1e6) {
+								$position_sql = number_format($num, 2, '.', '');
+								break;
+							}
+						}
+					}
+				}
+			}
+			$rows[] = "({$group_q_numeric},{$item_q_numeric},{$position_sql})";
+		}
+		return $rows;
 	}
 
 	/**
@@ -1209,6 +1228,69 @@ class WikiStream
 				throw $e;
 			}
 		}
+	}
+
+	/**
+	 * Rebuild the `group_item` table for every item already in `item`.
+	 *
+	 * Unlike the normal ingestion path (which only re-reads items with
+	 * available=0), this walks every q in `item`, refetches it from
+	 * Wikidata in chunks, and rewrites its group_item rows from the
+	 * configured $group_membership_prop claims.
+	 *
+	 * Intended as a one-off after enabling episode/series support so
+	 * already-ingested items pick up their series membership without
+	 * having to flip them all back to available=0. Idempotent — safe to
+	 * re-run. Does NOT touch `item`, `section`, `file`, or labels.
+	 *
+	 * The final pass calls import_missing_groups() so any newly
+	 * referenced group_q values get their metadata filled in.
+	 */
+	public function backfill_group_items(): void
+	{
+		if (empty($this->config->group_membership_prop)) {
+			return;
+		}
+		$sql = "SELECT `q` FROM `item`";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		$qs = [];
+		while ($o = $result->fetch_object()) {
+			$qs[] = (int) $o->q;
+		}
+		$this->freeResult($result);
+		if (empty($qs)) {
+			return;
+		}
+		foreach (array_chunk($qs, 50) as $chunk) {
+			$wil = $this->loadWikidataItemList($chunk);
+			$group_items = [];
+			foreach ($chunk as $q_numeric) {
+				$item = $wil->getItem($q_numeric);
+				if (!isset($item)) {
+					continue;
+				}
+				foreach ($this->extract_group_item_rows($item, $q_numeric) as $row) {
+					$group_items[] = $row;
+				}
+			}
+			$this->beginTransaction();
+			try {
+				$qList = implode(",", $chunk);
+				$sql = "DELETE FROM `group_item` WHERE `item_q` IN ({$qList})";
+				$this->tfc->getSQL($this->db, $sql);
+				if (!empty($group_items)) {
+					$sql =
+						"INSERT IGNORE INTO `group_item` (`group_q`,`item_q`,`position`) VALUES " .
+						implode(",", $group_items);
+					$this->tfc->getSQL($this->db, $sql);
+				}
+				$this->commit();
+			} catch (\Throwable $e) {
+				$this->rollback();
+				throw $e;
+			}
+		}
+		$this->import_missing_groups();
 	}
 
 	public function import_missing_section_labels(): void
