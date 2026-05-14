@@ -26,12 +26,18 @@ $out = [ 'status'=>'OK' ];
 if ( $action=='get_entry' ) {
 	$q = preg_replace('|\D|','',$ws->tfc->getRequest('q',0))*1;
 	$out['data'] = $ws->getEntry($q);
-	try {
-		$user_id = $widar->get_user_id()*1;
-		$ws->ensure_user_exists($user_id, $widar->get_username());
-		$out['data']->on_user_item_list = $ws->is_user_watching_item($user_id,$q);
-	} catch (Exception $e) {
-		$out['data']->on_user_item_list = false;
+	# getEntry returns null when the item isn't in vw_ranked_entries
+	# (unknown q, or no playable media yet). The frontend renders an
+	# "item not in WikiFlix" message when data is null, so just skip
+	# the per-user watch-list lookup.
+	if ( isset($out['data']) ) {
+		try {
+			$user_id = $widar->get_user_id()*1;
+			$ws->ensure_user_exists($user_id, $widar->get_username());
+			$out['data']->on_user_item_list = $ws->is_user_watching_item($user_id,$q);
+		} catch (Exception $e) {
+			$out['data']->on_user_item_list = false;
+		}
 	}
 } else if ( $action=='get_random_entry' ) {
 	$out['data'] = [ 'q' => $ws->getRandomEntryQ() ];
