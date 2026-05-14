@@ -13,7 +13,7 @@
         <summary lang="en_GB">Freely-licensed films from Wikidata / Wikimedia Commons</summary>
         <description lang="en_GB">Browse and play the WikiFlix catalogue of free films — sourced from Wikidata and hosted on Wikimedia Commons, the Internet Archive, and other open platforms.</description>
         <platform>all</platform>
-        <license>MIT</license>
+        <license>GPL-3.0-or-later</license>
         <source>https://github.com/magnusmanske/wikistream</source>
         <website>https://wikiflix.toolforge.org/</website>
         <assets>
