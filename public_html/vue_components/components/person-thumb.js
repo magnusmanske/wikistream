@@ -15,7 +15,7 @@ export default {
         <div class="person-box">
             <router-link :to="'/person/'+person.q">
                 <div class="person-picture">
-                    <commons-thumbnail v-if="person.image!=''" loading="lazy" nolink="1" :filename="person.image" width="250" height="300"></commons-thumbnail>
+                    <commons-thumbnail v-if="person.image!=''" loading="lazy" nolink="1" :filename="person.image" width="260"></commons-thumbnail>
                 </div>
                 <div>
                     {{person.label}}

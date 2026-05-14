@@ -161,6 +161,18 @@ div.person-picture {
     max-width: 260px;
     height: 300px;
     margin-bottom: 0.2rem;
+    overflow: hidden;
+    border-radius: 8px;
+}
+/* Fit the image to the fixed 260×300 frame by cropping (object-fit: cover),
+   not by stretching/squashing. Anchor to the top so head-and-shoulders
+   portraits keep the face visible when the natural aspect is taller than
+   the frame. */
+div.person-picture img.wiki_thumbnail {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center top;
 }
 div.person-picture:hover {
     opacity: 0.5;
