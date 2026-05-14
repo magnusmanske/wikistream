@@ -437,6 +437,86 @@ final class WikiStreamTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // ensure_user_exists() inserts (id,name) so the user.id matches the
+    // MediaWiki user id used in user_item_list. INSERT IGNORE makes
+    // subsequent logins a no-op.
+    // ------------------------------------------------------------------
+
+    public function test_ensure_user_exists_inserts_id_and_name(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $captured = '';
+        $tfc->expects($this->once())
+            ->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->ensure_user_exists(42, 'Magnus Manske');
+
+        $this->assertStringContainsString('INSERT IGNORE', $captured);
+        $this->assertStringContainsString('`user`', $captured);
+        $this->assertStringContainsString('42', $captured);
+        $this->assertStringContainsString("'Magnus Manske'", $captured);
+    }
+
+    public function test_ensure_user_exists_escapes_apostrophe_in_username(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $captured = '';
+        $tfc->expects($this->once())
+            ->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->ensure_user_exists(7, "O'Brien");
+
+        // The fake db's real_escape_string is addslashes(), so ' -> \'
+        $this->assertStringContainsString("'O\\'Brien'", $captured);
+    }
+
+    public function test_ensure_user_exists_casts_user_id_to_int(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $captured = '';
+        $tfc->expects($this->once())
+            ->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        // String input simulating $widar->get_user_id() that hasn't been
+        // explicitly cast; the method must reject non-integer values.
+        $ws->ensure_user_exists('99); DROP TABLE user;--', 'attacker');
+
+        $this->assertStringContainsString('VALUES (99,', $captured);
+        $this->assertStringNotContainsString('DROP', $captured);
+    }
+
+    public function test_ensure_user_exists_noop_on_empty_username(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->expects($this->never())->method('getSQL');
+
+        $ws->ensure_user_exists(5, '');
+    }
+
+    public function test_ensure_user_exists_noop_on_zero_user_id(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->expects($this->never())->method('getSQL');
+
+        $ws->ensure_user_exists(0, 'somebody');
+    }
+
+    // ------------------------------------------------------------------
     // get_total_candidate_items() returns the integer total from the DB.
     // ------------------------------------------------------------------
 

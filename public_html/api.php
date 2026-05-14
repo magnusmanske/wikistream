@@ -28,6 +28,7 @@ if ( $action=='get_entry' ) {
 	$out['data'] = $ws->getEntry($q);
 	try {
 		$user_id = $widar->get_user_id()*1;
+		$ws->ensure_user_exists($user_id, $widar->get_username());
 		$out['data']->on_user_item_list = $ws->is_user_watching_item($user_id,$q);
 	} catch (Exception $e) {
 		$out['data']->on_user_item_list = false;
@@ -62,7 +63,7 @@ if ( $action=='get_entry' ) {
 } else if ( $action=='get_your_list' ) {
 	try {
 		$user_id = $widar->get_user_id()*1;
-		#$user_name = $widar->get_username();
+		$ws->ensure_user_exists($user_id, $widar->get_username());
 		$subquery = "SELECT q FROM vw_user_item_list WHERE user_id={$user_id}";
 		$out['data'] = $ws->get_item_view('vw_ranked_entries',PHP_INT_MAX,null,$subquery) ;
 	} catch (Exception $e) {
@@ -73,6 +74,7 @@ if ( $action=='get_entry' ) {
 	$state = $ws->tfc->getRequest('state',0)*1;
 	try {
 		$user_id = $widar->get_user_id()*1;
+		$ws->ensure_user_exists($user_id, $widar->get_username());
 		$ws->set_user_list_state($user_id,$q,$state);
 	} catch (Exception $e) {
 		$out['status'] = $e->getMessage();

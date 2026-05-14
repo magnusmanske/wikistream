@@ -2656,6 +2656,22 @@ class WikiStream
 		$this->tfc->getSQL($this->db, $sql);
 	}
 
+	// Ensures a row exists in `user` for the authenticated MediaWiki user.
+	// `user.id` is set to the MediaWiki user id so it lines up with the values
+	// already stored in `user_item_list.user_id` (and the join in
+	// `vw_user_item_list`). Without this row, `get_your_list` returns nothing
+	// after a first OAuth login.
+	public function ensure_user_exists($user_id, string $username): void
+	{
+		$user_id = (int) $user_id;
+		if ($user_id <= 0 || $username === '') {
+			return;
+		}
+		$name_safe = $this->db->real_escape_string($username);
+		$sql = "INSERT IGNORE INTO `user` (`id`,`name`) VALUES ({$user_id},'{$name_safe}')";
+		$this->tfc->getSQL($this->db, $sql);
+	}
+
 	public function is_user_watching_item($user_id, $q): bool
 	{
 		$user_id *= 1;
