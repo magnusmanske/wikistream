@@ -264,10 +264,10 @@ class WikiStream
 		$wil = new WikidataItemList();
 		$wil->loadItems($to_load);
 		$itemsByQ = [];
-		foreach ($to_load as $q) {
-			$it = $wil->getItem($q);
+		foreach ($to_load as $section_q) {
+			$it = $wil->getItem($section_q);
 			if ($it !== null) {
-				$itemsByQ[(int) $q] = $it;
+				$itemsByQ[(int) $section_q] = $it;
 			}
 		}
 		$ret->sections = $this->populate_sections_batch($sections, $itemsByQ);
