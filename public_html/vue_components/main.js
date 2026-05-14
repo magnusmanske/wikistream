@@ -13,6 +13,7 @@ import { registerAll } from '../resources/vue_es6/index.js';
 
 import PageHeader      from './components/page-header.js';
 import EntryThumb      from './components/entry-thumb.js';
+import GroupThumb      from './components/group-thumb.js';
 import PersonThumb     from './components/person-thumb.js';
 import SectionRow      from './components/section-row.js';
 import SkeletonRow     from './components/skeleton-row.js';
@@ -44,6 +45,7 @@ registerAll(Vue);
 //    (which isn't included in registerAll's barrel).
 Vue.component('page-header',     PageHeader);
 Vue.component('entry-thumb',     EntryThumb);
+Vue.component('group-thumb',     GroupThumb);
 Vue.component('person-thumb',    PersonThumb);
 Vue.component('section-row',     SectionRow);
 Vue.component('skeleton-row',    SkeletonRow);

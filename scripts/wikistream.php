@@ -1826,6 +1826,34 @@ class WikiStream
 		return $ret;
 	}
 
+	/**
+	 * Search groups (series, franchises, …) by label. Matches against the
+	 * `label` table so a query in any language hits — same approach as
+	 * search_sections — then loads the canonical row from `group`.
+	 * Returns rows with the same shape as `getGroup`'s top-level metadata
+	 * (without entries/subgroups), so a frontend group-thumb can render
+	 * them directly. LIMIT 50, like the other search_* methods.
+	 */
+	public function search_groups($query): array
+	{
+		$ret = [];
+		$query_safe = $this->db->real_escape_string(trim($query));
+		if ($query_safe == "") {
+			return $ret;
+		} # Too broad a search
+		$sql =
+			"SELECT * FROM `group` " .
+			"WHERE `q` IN (SELECT DISTINCT `q` FROM `label` WHERE `value` LIKE '%{$query_safe}%') " .
+			"LIMIT 50";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		while ($o = $result->fetch_object()) {
+			$o->q = (int) $o->q;
+			$ret[] = $o;
+		}
+		$this->freeResult($result);
+		return $ret;
+	}
+
 	public function search_people($query): array
 	{
 		$ret = [];

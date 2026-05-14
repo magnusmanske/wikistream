@@ -134,6 +134,101 @@ final class WikiStreamTest extends TestCase
         $this->assertSame([], $ws->search_sections('   '));
     }
 
+    public function test_search_groups_empty_string_returns_empty_array(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->expects($this->never())->method('getSQL');
+
+        $this->assertSame([], $ws->search_groups(''));
+    }
+
+    public function test_search_groups_whitespace_only_returns_empty_array(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->expects($this->never())->method('getSQL');
+
+        $this->assertSame([], $ws->search_groups('   '));
+    }
+
+    // ------------------------------------------------------------------
+    // search_groups() with a non-empty query returns rows from the
+    // `group` table, matched via the `label` table for multi-language
+    // hits.
+    // ------------------------------------------------------------------
+
+    public function test_search_groups_non_empty_query_returns_rows(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $row         = new \stdClass();
+        $row->q      = 12060736;
+        $row->title  = 'Industry on Parade';
+        $row->year   = 1951;
+        $row->image  = null;
+        $row->type_q = null;
+        $row->ts     = '20260514000000';
+
+        $tfc->expects($this->once())
+            ->method('getSQL')
+            ->willReturn($this->makeResult([$row]));
+
+        $results = $ws->search_groups('Industry');
+
+        $this->assertCount(1, $results);
+        $this->assertSame('Industry on Parade', $results[0]->title);
+        $this->assertSame(12060736, (int) $results[0]->q);
+    }
+
+    public function test_search_groups_sql_queries_group_via_label_table(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $captured = '';
+        $tfc->expects($this->once())
+            ->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->search_groups('Calvin');
+
+        $this->assertStringContainsString('FROM `group`', $captured);
+        $this->assertStringContainsString('`label`', $captured);
+        // The user-supplied term must be embedded in the WHERE clause.
+        $this->assertStringContainsString('Calvin', $captured);
+        // Bound by LIMIT to avoid runaway result sets.
+        $this->assertMatchesRegularExpression('/LIMIT\s+50\b/', $captured);
+    }
+
+    public function test_search_groups_escapes_single_quotes_in_query(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $captured = '';
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        // makeFakeDb()->real_escape_string is just addslashes — that's enough
+        // to verify a quote in the user query is escaped before reaching the SQL.
+        $ws->search_groups("O'Brien");
+
+        $this->assertStringContainsString("O\\'Brien", $captured);
+        // Critically, the unescaped quote must not break out of the LIKE literal.
+        $this->assertStringNotContainsString("LIKE '%O'Brien%'", $captured);
+    }
+
+    public function test_search_groups_returns_empty_array_when_db_returns_no_rows(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->method('getSQL')->willReturn($this->emptyResult());
+
+        $this->assertSame([], $ws->search_groups('nothing-matches-this'));
+    }
+
     // ------------------------------------------------------------------
     // search_entries() with a non-empty query issues a SQL query and
     // returns the result rows (with fix_item_image applied).

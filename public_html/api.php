@@ -112,9 +112,10 @@ if ( $action=='get_entry' ) {
 	}
 } else if ( $action=='search' ) {
 	$query = $ws->tfc->getRequest('query','');
-	$out['data']['entries'] = $ws->search_entries($query);
+	$out['data']['entries']  = $ws->search_entries($query);
 	$out['data']['sections'] = $ws->search_sections($query);
-	$out['data']['people'] = $ws->search_people($query);
+	$out['data']['people']   = $ws->search_people($query);
+	$out['data']['groups']   = $ws->search_groups($query);
 } else if ( $action=='get_person' ) {
 	$q = $ws->tfc->getRequest('q',0)*1;
 	$out['data'] = $ws->getPerson($q);

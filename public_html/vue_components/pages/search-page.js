@@ -20,6 +20,7 @@ export default {
         const entries = ref([]);
         const sections = ref([]);
         const people = ref([]);
+        const groups = ref([]);
         const { error, run } = useFetch();
 
         async function run_search() {
@@ -32,6 +33,7 @@ export default {
                 entries.value = j.data?.entries || [];
                 sections.value = j.data?.sections || [];
                 people.value = j.data?.people || [];
+                groups.value = j.data?.groups || [];
             }
             loading.value = false;
             focusInput();
@@ -52,7 +54,7 @@ export default {
             }
         });
 
-        return { loading, query, entries, sections, people, error, run_search };
+        return { loading, query, entries, sections, people, groups, error, run_search };
     },
     methods: {
         // $router only available on Options-API `this`.
@@ -79,13 +81,19 @@ export default {
                     <error-banner v-if="error" :error="error"></error-banner>
                     <skeleton-row v-else-if="loading" :count="12"></skeleton-row>
                     <div v-else-if="query==''"></div>
-                    <div v-else-if="entries.length+sections.length+people.length==0">
+                    <div v-else-if="entries.length+sections.length+people.length+groups.length==0">
                         <i tt="no_search_results"></i>
                     </div>
                     <div v-else style="width: 100%;">
                         <div v-if="entries.length>0">
                             <h3 tt="entries"></h3>
                             <section-row :entries="entries" multi_row="1"></section-row>
+                        </div>
+                        <div v-if="groups.length>0">
+                            <h3 tt="series"></h3>
+                            <div style="display: flex; flex-wrap: wrap;">
+                                <group-thumb v-for="g in groups" :key="g.q" :group="g"></group-thumb>
+                            </div>
                         </div>
                         <div v-if="people.length>0">
                             <h3 tt="people"></h3>
