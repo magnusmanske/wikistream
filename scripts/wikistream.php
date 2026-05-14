@@ -248,6 +248,47 @@ class WikiStream
 		return $ret;
 	}
 
+	/**
+	 * Look up labels for a list of Q-numbers from our `label` table —
+	 * a much cheaper substitute for fetching full Wikidata items via
+	 * wbgetentities when all the caller needs is the display title.
+	 *
+	 * Returns a map of numeric Q-id → label string in `$this->language`,
+	 * falling back to English. Q-numbers with neither a localized nor an
+	 * English label are absent from the result — the caller decides the
+	 * display fallback (typically "Q<n>").
+	 *
+	 * @param array<int|string> $qs
+	 * @return array<int, string>
+	 */
+	protected function loadLabelsByQ(array $qs): array
+	{
+		if (empty($qs)) {
+			return [];
+		}
+		$qs_safe = implode(",", array_map(fn($q) => (int) $q, $qs));
+		// $this->language is already sanitized in api.php to [a-z-].
+		$lang = $this->language ?? 'en';
+		$sql = "SELECT `q`, `language`, `value` FROM `label` " .
+			"WHERE `q` IN ({$qs_safe}) " .
+			"AND `language` IN ('{$lang}', 'en')";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		$byQ = []; // q → [lang => value]
+		while ($o = $result->fetch_object()) {
+			$byQ[(int) $o->q][$o->language] = $o->value;
+		}
+		$this->freeResult($result);
+		$out = [];
+		foreach ($byQ as $q => $langs) {
+			if (isset($langs[$lang]) && $langs[$lang] !== '') {
+				$out[$q] = $langs[$lang];
+			} elseif (isset($langs['en']) && $langs['en'] !== '') {
+				$out[$q] = $langs['en'];
+			}
+		}
+		return $out;
+	}
+
 	// Batch-fetch person records (without files) for a list of Q-numbers.
 	// Returns an array keyed by numeric Q-id.
 	protected function getPersonsBatch(array $qs): array
@@ -363,16 +404,13 @@ class WikiStream
 			}
 			$ret->people["P{$o->property}"]["Q{$o->section_q}"] = $person_obj;
 		}
-		$wil = new WikidataItemList();
-		$wil->loadItems($to_load);
-		$itemsByQ = [];
-		foreach ($to_load as $section_q) {
-			$it = $wil->getItem($section_q);
-			if ($it !== null) {
-				$itemsByQ[(int) $section_q] = $it;
-			}
-		}
-		$ret->sections = $this->populate_sections_batch($sections, $itemsByQ);
+		// Pull section titles from our local `label` table instead of
+		// fetching each section_q's full Wikidata item — the only thing
+		// we used to do with those items was call getLabel(). One SQL
+		// round-trip replaces a synchronous wbgetentities HTTP call,
+		// which was the dominant latency in this endpoint.
+		$titlesByQ = $this->loadLabelsByQ($to_load);
+		$ret->sections = $this->populate_sections_batch($sections, $titlesByQ);
 		$ret->groups = $this->get_sibling_group_entries($q);
 
 		return $ret;
@@ -1653,16 +1691,8 @@ class WikiStream
 		foreach ($sections as $section) {
 			$qs[] = $section->section_q;
 		}
-		$wil = new WikidataItemList();
-		$wil->loadItems($qs);
-		$itemsByQ = [];
-		foreach ($qs as $q) {
-			$it = $wil->getItem($q);
-			if ($it !== null) {
-				$itemsByQ[(int) $q] = $it;
-			}
-		}
-		foreach ($this->populate_sections_batch($sections, $itemsByQ, $max_movies_per_section) as $populated) {
+		$titlesByQ = $this->loadLabelsByQ($qs);
+		foreach ($this->populate_sections_batch($sections, $titlesByQ, $max_movies_per_section) as $populated) {
 			$out["sections"][] = $populated;
 		}
 
@@ -1707,11 +1737,18 @@ class WikiStream
 	 * over potentially thousands of sections; for the common 20-section main
 	 * page the overhead is negligible.
 	 *
+	 * $titlesByQ provides each section's display title — sourced from our
+	 * local `label` table by the caller, so a single SQL lookup replaces
+	 * the previous wbgetentities round-trip just to read getLabel(). A
+	 * section_q absent from the map renders with a "Q<n>" stub title so
+	 * the row still appears (rather than silently disappearing) — that's
+	 * the tell that import_missing_section_labels needs to run.
+	 *
 	 * @param array $sections list of section row-objects with section_q + property
-	 * @param array $itemsByQ map of section_q (int) → WikidataItem (for the title)
-	 * @return array list of populated section blocks (skipping sections whose item is missing)
+	 * @param array<int, string> $titlesByQ map of section_q → display title
+	 * @return array list of populated section blocks
 	 */
-	protected function populate_sections_batch(array $sections, array $itemsByQ, int $max = 25): array
+	protected function populate_sections_batch(array $sections, array $titlesByQ, int $max = 25): array
 	{
 		if (empty($sections)) {
 			return [];
@@ -1760,12 +1797,9 @@ class WikiStream
 		$out = [];
 		foreach ($sections as $section) {
 			$sq = (int) $section->section_q;
-			if (!isset($itemsByQ[$sq])) {
-				continue;
-			}
 			$out[] = [
 				"q" => $section->section_q,
-				"title" => $itemsByQ[$sq]->getLabel(),
+				"title" => $titlesByQ[$sq] ?? "Q{$sq}",
 				"prop" => $section->property,
 				"total" => $totals[$sq] ?? 0,
 				"entries" => $entriesBySection[$sq] ?? [],
@@ -1797,16 +1831,8 @@ class WikiStream
 		foreach ($sections as $section) {
 			$qs[] = $section->section_q;
 		}
-		$wil = new WikidataItemList();
-		$wil->loadItems($qs);
-		$itemsByQ = [];
-		foreach ($qs as $q) {
-			$it = $wil->getItem($q);
-			if ($it !== null) {
-				$itemsByQ[(int) $q] = $it;
-			}
-		}
-		return $this->populate_sections_batch($sections, $itemsByQ);
+		$titlesByQ = $this->loadLabelsByQ($qs);
+		return $this->populate_sections_batch($sections, $titlesByQ);
 	}
 
 	public function search_entries($query): array

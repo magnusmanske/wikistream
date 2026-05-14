@@ -1218,6 +1218,157 @@ final class WikiStreamTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // loadLabelsByQ() — local label-table lookup that replaces the
+    // wbgetentities round-trip used by getEntry / search_sections /
+    // get_main_page_data.
+    // ------------------------------------------------------------------
+
+    private function invokeLoadLabelsByQ(\WikiStream $ws, array $qs): array
+    {
+        $m = new ReflectionMethod($ws, 'loadLabelsByQ');
+        return $m->invoke($ws, $qs);
+    }
+
+    private function labelRow(int $q, string $language, string $value): \stdClass
+    {
+        $row = new \stdClass();
+        $row->q        = $q;
+        $row->language = $language;
+        $row->value    = $value;
+        return $row;
+    }
+
+    public function test_loadLabelsByQ_returns_empty_for_empty_input_without_db_call(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->expects($this->never())->method('getSQL');
+
+        $this->assertSame([], $this->invokeLoadLabelsByQ($ws, []));
+    }
+
+    public function test_loadLabelsByQ_prefers_current_language_over_english(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $ws->language = 'de';
+
+        $tfc->method('getSQL')->willReturn($this->makeResult([
+            $this->labelRow(100, 'en', 'Film'),
+            $this->labelRow(100, 'de', 'Spielfilm'),
+        ]));
+
+        $out = $this->invokeLoadLabelsByQ($ws, [100]);
+
+        $this->assertSame('Spielfilm', $out[100]);
+    }
+
+    public function test_loadLabelsByQ_falls_back_to_english_when_localized_missing(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $ws->language = 'de';
+
+        $tfc->method('getSQL')->willReturn($this->makeResult([
+            $this->labelRow(100, 'en', 'Film'),
+        ]));
+
+        $out = $this->invokeLoadLabelsByQ($ws, [100]);
+
+        $this->assertSame('Film', $out[100]);
+    }
+
+    public function test_loadLabelsByQ_omits_q_with_no_label_in_either_language(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $ws->language = 'en';
+
+        // Q 100 has a fr-only label; Q 200 has nothing. Both must be absent
+        // from the map so the caller can render a "Q<n>" stub.
+        $tfc->method('getSQL')->willReturn($this->makeResult([
+            $this->labelRow(100, 'fr', 'Film'),
+        ]));
+
+        $out = $this->invokeLoadLabelsByQ($ws, [100, 200]);
+
+        $this->assertSame([], $out);
+    }
+
+    public function test_loadLabelsByQ_treats_empty_string_label_as_missing(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $ws->language = 'en';
+
+        $tfc->method('getSQL')->willReturn($this->makeResult([
+            $this->labelRow(100, 'en', ''),
+        ]));
+
+        $out = $this->invokeLoadLabelsByQ($ws, [100]);
+
+        $this->assertSame([], $out);
+    }
+
+    public function test_loadLabelsByQ_emits_sql_with_int_cast_qs_and_lang_pair(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $ws->language = 'de';
+
+        $captured = '';
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        // SQL-injection-style payloads must be reduced to bare integers
+        // before reaching the SQL.
+        $this->invokeLoadLabelsByQ($ws, ['100; DROP TABLE label;--', '200']);
+
+        $this->assertStringContainsString('100', $captured);
+        $this->assertStringContainsString('200', $captured);
+        $this->assertStringNotContainsString('DROP', $captured);
+        $this->assertStringContainsString("`language` IN ('de', 'en')", $captured);
+    }
+
+    // ------------------------------------------------------------------
+    // populate_sections_batch() now takes a titlesByQ map instead of a
+    // WikidataItem map. Verify the title flows through and that a
+    // section without a known label renders with a "Q<n>" stub.
+    // ------------------------------------------------------------------
+
+    private function invokePopulateSectionsBatch(\WikiStream $ws, array $sections, array $titlesByQ): array
+    {
+        $m = new ReflectionMethod($ws, 'populate_sections_batch');
+        return $m->invoke($ws, $sections, $titlesByQ);
+    }
+
+    public function test_populate_sections_batch_uses_supplied_title(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        // 1st call: totals — empty; 2nd call: ranked entries — empty
+        $tfc->method('getSQL')->willReturn($this->emptyResult());
+
+        $sections = [(object) ['section_q' => 12345, 'property' => 136]];
+        $out = $this->invokePopulateSectionsBatch($ws, $sections, [12345 => 'Drama film']);
+
+        $this->assertCount(1, $out);
+        $this->assertSame('Drama film', $out[0]['title']);
+        $this->assertSame(12345, (int) $out[0]['q']);
+    }
+
+    public function test_populate_sections_batch_falls_back_to_q_stub_when_title_missing(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->method('getSQL')->willReturn($this->emptyResult());
+
+        $sections = [(object) ['section_q' => 99999, 'property' => 136]];
+        $out = $this->invokePopulateSectionsBatch($ws, $sections, []); // empty title map
+
+        // Section still renders — the missing label is visible, but the
+        // row isn't silently dropped.
+        $this->assertCount(1, $out);
+        $this->assertSame('Q99999', $out[0]['title']);
+    }
+
+    // ------------------------------------------------------------------
     // getGroup() — group metadata + items, optionally split by subgroup
     // (season for TV series).
     // ------------------------------------------------------------------
