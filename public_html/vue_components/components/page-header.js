@@ -79,6 +79,7 @@ export default {
                 <router-link to="/sections">
                     {{section_total}} <span tt="sections_total"></span>
                 </router-link>.
+                <router-link to="/groups" tt="series"></router-link>.
                 <router-link to="/year" tt="by_years"></router-link>.
                 <router-link to="/candidates" tt="add_more"></router-link>!
             </div>

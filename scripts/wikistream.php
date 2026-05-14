@@ -219,6 +219,126 @@ class WikiStream
 		return $ret;
 	}
 
+	/**
+	 * Paginated, populated group rows for the SPA's "all groups" view.
+	 * Mirrors get_paginated_sections: each row carries up to $max
+	 * entries (entry-thumb shape). Ordered by item count desc, then
+	 * group_q for stable pagination. Groups with zero items in
+	 * vw_ranked_entries are excluded — they'd render as empty rows.
+	 *
+	 * @return list<array{q:int,title:string,prop:int,total:int,entries:list<object>}>
+	 */
+	public function get_paginated_groups(int $offset, int $limit, int $max = 25): array
+	{
+		$limit = max(0, $limit);
+		if ($limit === 0) {
+			return [];
+		}
+		$offset = max(0, $offset);
+		// Step 1: pick the next page of groups, ordered by how many of
+		// their items are actually in vw_ranked_entries (so seasons with
+		// no episodes here, or groups with only no-files items, sink).
+		$sql =
+			"SELECT g.`q` AS `q`, g.`title` AS `title`, g.`year` AS `year`, " .
+			"g.`image` AS `image`, g.`type_q` AS `type_q`, " .
+			"COUNT(v.`q`) AS `cnt` " .
+			"FROM `group` g " .
+			"JOIN `group_item` gi ON gi.`group_q` = g.`q` " .
+			"JOIN `vw_ranked_entries` v ON v.`q` = gi.`item_q` " .
+			"GROUP BY g.`q` " .
+			"HAVING `cnt` > 0 " .
+			"ORDER BY `cnt` DESC, g.`q` " .
+			"LIMIT {$limit} OFFSET {$offset}";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		$groups = [];
+		$gqs = [];
+		while ($o = $result->fetch_object()) {
+			$o->q = (int) $o->q;
+			$groups[$o->q] = $o;
+			$gqs[] = $o->q;
+		}
+		$this->freeResult($result);
+		if (empty($gqs)) {
+			return [];
+		}
+		return $this->populate_groups_batch($groups, $gqs, $max);
+	}
+
+	/**
+	 * Batched analogue of getGroup() for many groups at once. Two SQL
+	 * round-trips total (one COUNT, one windowed top-N) regardless of
+	 * how many groups, mirroring populate_sections_batch.
+	 *
+	 * Note: $groups is keyed by group_q (int) and pre-populated with
+	 * metadata. $gqs preserves the iteration order so the output
+	 * matches the caller's pagination ordering.
+	 *
+	 * @param array<int, object> $groups
+	 * @param list<int> $gqs
+	 * @return list<array{q:int,title:string,total:int,entries:list<object>}>
+	 */
+	protected function populate_groups_batch(array $groups, array $gqs, int $max = 25): array
+	{
+		if (empty($gqs)) {
+			return [];
+		}
+		$qList = implode(",", array_map('intval', $gqs));
+
+		// Totals: COUNT per group across vw_ranked_entries.
+		$totals = [];
+		$sql =
+			"SELECT gi.`group_q`, COUNT(*) AS `cnt` " .
+			"FROM `group_item` gi " .
+			"JOIN `vw_ranked_entries` v ON v.`q` = gi.`item_q` " .
+			"WHERE gi.`group_q` IN ({$qList}) " .
+			"GROUP BY gi.`group_q`";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		while ($o = $result->fetch_object()) {
+			$totals[(int) $o->group_q] = (int) $o->cnt;
+		}
+		$this->freeResult($result);
+
+		// Top-N entries per group via a window function. Same shape as
+		// populate_sections_batch's ranked query but partitioned on
+		// group_q and ordered by group_item.position (so episodes come
+		// out in series order).
+		$entriesByGroup = [];
+		$max_safe = max(1, $max);
+		$sql = "SELECT * FROM (
+			SELECT v.*, gi.`group_q` AS `_bucket`,
+				ROW_NUMBER() OVER (PARTITION BY gi.`group_q` ORDER BY gi.`position` IS NULL, gi.`position`, gi.`item_q`) AS `_rn`
+			FROM `vw_ranked_entries` v
+			JOIN `group_item` gi ON gi.`item_q` = v.`q`
+			WHERE gi.`group_q` IN ({$qList})
+		) ranked WHERE `_rn` <= {$max_safe}";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		while ($o = $result->fetch_object()) {
+			$bucket = (int) $o->_bucket;
+			unset($o->_bucket, $o->_rn);
+			$this->fix_item_image($o);
+			$entriesByGroup[$bucket][] = $o;
+		}
+		$this->freeResult($result);
+
+		$out = [];
+		foreach ($gqs as $gq) {
+			if (!isset($groups[$gq])) {
+				continue;
+			}
+			$meta = $groups[$gq];
+			$out[] = [
+				"q"       => $gq,
+				"title"   => $meta->title ?? "Q{$gq}",
+				"year"    => isset($meta->year) ? (int) $meta->year : null,
+				"image"   => $meta->image ?? null,
+				"type_q"  => isset($meta->type_q) ? (int) $meta->type_q : null,
+				"total"   => $totals[$gq] ?? 0,
+				"entries" => $entriesByGroup[$gq] ?? [],
+			];
+		}
+		return $out;
+	}
+
 	public function getPerson($q, $add_files = true): object
 	{
 		$ret = (object) ["q" => $q, "entries" => []];
@@ -1552,6 +1672,7 @@ class WikiStream
 		$num = 20,
 		$properties = [],
 		$skip_section_q = null,
+		$offset = 0,
 	): array {
 		if ($skip_section_q == null) {
 			$skip_section_q = $this->config->skip_section_q;
@@ -1563,19 +1684,57 @@ class WikiStream
 			$skip_section_q,
 			$this->config->bad_genres,
 		);
+		$num = max(0, (int) $num);
+		$offset = max(0, (int) $offset);
 		$ret = [];
 		$sql =
 			"SELECT *,(SELECT `value` FROM `label` WHERE `language`='{$this->language}' AND `q`=`section_q`) AS `label` FROM `vw_section_property_q` WHERE `property` IN (" .
 			implode(",", $properties) .
 			") AND `section_q` NOT IN (" .
 			implode(",", $skip_section_q) .
-			") LIMIT {$num}";
+			") LIMIT {$num} OFFSET {$offset}";
 		$result = $this->tfc->getSQL($this->db, $sql);
 		while ($o = $result->fetch_object()) {
 			$ret[] = $o;
 		}
 		$this->freeResult($result);
 		return $ret;
+	}
+
+	/**
+	 * Paginated, populated section rows for the SPA's "all sections"
+	 * view. Each row carries up to $max entries (entry-thumb shape),
+	 * exactly like the main-page sections. Ordered by item count desc
+	 * (same order as get_top_sections / vw_section_property_q).
+	 *
+	 * The split from get_top_sections lets the Kodi plugin keep
+	 * consuming the lightweight metadata-only list via get_all_sections,
+	 * while the web UI gets fully populated rows in batches.
+	 *
+	 * @return list<array{q:int,title:string,prop:int,total:int,entries:list<object>}>
+	 */
+	public function get_paginated_sections(int $offset, int $limit, int $max = 25): array
+	{
+		$limit = max(0, $limit);
+		if ($limit === 0) {
+			return [];
+		}
+		$sections = $this->get_top_sections($limit, [], null, max(0, $offset));
+		if (empty($sections)) {
+			return [];
+		}
+		$qs = array_map(fn($s) => (int) $s->section_q, $sections);
+		$titlesByQ = $this->loadLabelsByQ($qs);
+		// Prefer the label column already joined in vw_section_property_q
+		// (resolved in $this->language) when available — that's the
+		// language the user actually asked for. Fall back to the en-or-
+		// fallback map from loadLabelsByQ for any missing entries.
+		foreach ($sections as $s) {
+			if (!empty($s->label)) {
+				$titlesByQ[(int) $s->section_q] = $s->label;
+			}
+		}
+		return $this->populate_sections_batch($sections, $titlesByQ, $max);
 	}
 
 	protected function get_top_sections_count(

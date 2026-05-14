@@ -14,6 +14,7 @@ import SectionPage    from './pages/section-page.js';
 import SpecialPage    from './pages/special-page.js';
 import PersonPage     from './pages/person-page.js';
 import GroupPage      from './pages/group-page.js';
+import GroupsPage     from './pages/groups-page.js';
 import CandidatesPage from './pages/candidates-page.js';
 import YearPage       from './pages/year-page.js';
 import YouPage        from './pages/you-page.js';
@@ -32,6 +33,7 @@ export const routes = [
       props: (route) => ({ specialKey: route.params.key }) },
     { path: '/person/:q',                         component: PersonPage,     props: true },
     { path: '/group/:q',                          component: GroupPage,      props: true },
+    { path: '/groups',                            component: GroupsPage,     props: true },
     { path: '/candidates',                        component: CandidatesPage, props: true },
     { path: '/candidates/:offset',                component: CandidatesPage, props: true },
     { path: '/year',                              component: YearPage,       props: true },

@@ -1,12 +1,8 @@
 /**
- * <sections-page> — every section as a horizontal thumbnail bar.
- *
- * Loads sections in pages (10 at a time) via get_paginated_sections,
- * pulling more in as the user scrolls near the bottom. Each page row
- * is a <section-row> showing the section's top 25 entries.
- *
- * Section ordering matches vw_section_property_q (item count desc),
- * so the densest sections appear first.
+ * <groups-page> — every group (series, franchise, …) as a horizontal
+ * thumbnail bar. Loaded in pages via get_paginated_groups, with more
+ * pulled in as the user scrolls down. Each row is a <section-row> with
+ * `link_prefix="/group/"` so the heading deep-links to the group page.
  */
 
 import { ttMixin } from '../../resources/vue_es6/state.js';
@@ -14,26 +10,26 @@ import { useFetch } from '../composables/useFetch.js';
 import { useInfiniteScroll } from '../composables/useInfiniteScroll.js';
 
 export default {
-    name: 'SectionsPage',
+    name: 'GroupsPage',
     mixins: [ttMixin],
     setup() {
         const { error: fetchError, run } = useFetch();
 
         const {
-            items: sections, loading, loadingMore, error: scrollError,
+            items: groups, loading, loadingMore, error: scrollError,
             hasMore, retry, sentinelEl,
         } = useInfiniteScroll({
             pageSize: 10,
             async fetchPage(offset, limit) {
                 const j = await run(
-                    `./api.php?action=get_paginated_sections&offset=${offset}&limit=${limit}`,
+                    `./api.php?action=get_paginated_groups&offset=${offset}&limit=${limit}`,
                 );
                 const rows = Array.isArray(j?.data) ? j.data : [];
                 return { items: rows };
             },
         });
 
-        return { sections, loading, loadingMore, hasMore, sentinelEl, error: scrollError, fetchError, retry };
+        return { groups, loading, loadingMore, hasMore, sentinelEl, error: scrollError, fetchError, retry };
     },
     template: `
         <div class="container-fluid">
@@ -44,7 +40,7 @@ export default {
                     <skeleton-row :count="6"></skeleton-row>
                 </div>
                 <div v-else style="width: 100%;">
-                    <section-row v-for="section in sections" :key="section.q+'-'+section.prop" :section="section"></section-row>
+                    <section-row v-for="g in groups" :key="'group-'+g.q" :section="g" link_prefix="/group/"></section-row>
                     <div v-if="hasMore" ref="sentinelEl" class="infinite-sentinel" style="height: 1px;"></div>
                     <div v-if="loadingMore" style="margin: 1rem 0;">
                         <skeleton-row :count="2"></skeleton-row>

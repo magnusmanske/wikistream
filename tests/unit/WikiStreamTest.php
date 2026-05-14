@@ -230,6 +230,188 @@ final class WikiStreamTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // get_top_sections(offset) — pagination via the new offset arg.
+    // ------------------------------------------------------------------
+
+    public function test_get_top_sections_emits_offset_in_sql(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = '';
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->get_top_sections(10, [], null, 30);
+
+        $this->assertMatchesRegularExpression('/LIMIT\s+10\b/', $captured);
+        $this->assertMatchesRegularExpression('/OFFSET\s+30\b/', $captured);
+    }
+
+    public function test_get_top_sections_clamps_negative_offset_to_zero(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = '';
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->get_top_sections(10, [], null, -5);
+
+        $this->assertMatchesRegularExpression('/OFFSET\s+0\b/', $captured);
+    }
+
+    // ------------------------------------------------------------------
+    // get_paginated_sections() — returns populated rows via the same
+    // populate_sections_batch helper used by the main page.
+    // ------------------------------------------------------------------
+
+    public function test_get_paginated_sections_returns_empty_when_limit_zero_without_db_call(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->expects($this->never())->method('getSQL');
+
+        $this->assertSame([], $ws->get_paginated_sections(0, 0));
+    }
+
+    public function test_get_paginated_sections_returns_empty_when_no_sections_match(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        // 1st getSQL: get_top_sections returns nothing → method returns []
+        $tfc->method('getSQL')->willReturn($this->emptyResult());
+
+        $this->assertSame([], $ws->get_paginated_sections(0, 10));
+    }
+
+    public function test_get_paginated_sections_returns_populated_rows_with_titles(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = [];
+        // Sequence:
+        //   1. get_top_sections SELECT
+        //   2. loadLabelsByQ SELECT
+        //   3. populate_sections_batch totals SELECT
+        //   4. populate_sections_batch ranked SELECT
+        $section = new \stdClass();
+        $section->section_q = 5398426;
+        $section->property  = 31;
+        $section->cnt       = 7;
+        $section->label     = 'Television series'; // pre-resolved title
+
+        $this->stubSqlSequence(
+            $tfc,
+            [
+                $this->makeResult([$section]),
+                $this->emptyResult(), // loadLabelsByQ — empty, falls back to $section->label
+                $this->emptyResult(), // totals
+                $this->emptyResult(), // ranked
+            ],
+            $captured,
+        );
+
+        $out = $ws->get_paginated_sections(0, 10);
+
+        $this->assertCount(1, $out);
+        $this->assertSame('Television series', $out[0]['title']);
+        $this->assertSame(5398426, (int) $out[0]['q']);
+        $this->assertSame(31, (int) $out[0]['prop']);
+    }
+
+    // ------------------------------------------------------------------
+    // get_paginated_groups() + populate_groups_batch() — paginated
+    // group rows with their top entries.
+    // ------------------------------------------------------------------
+
+    public function test_get_paginated_groups_returns_empty_when_limit_zero(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->expects($this->never())->method('getSQL');
+
+        $this->assertSame([], $ws->get_paginated_groups(0, 0));
+    }
+
+    public function test_get_paginated_groups_emits_limit_and_offset(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = [];
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
+                $captured[] = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->get_paginated_groups(20, 5);
+
+        // First query is the group list. It must carry LIMIT 5 OFFSET 20
+        // and must restrict to groups with at least one item in vw_ranked_entries.
+        $this->assertNotEmpty($captured);
+        $this->assertMatchesRegularExpression('/LIMIT\s+5\s+OFFSET\s+20\b/', $captured[0]);
+        $this->assertStringContainsString('HAVING `cnt` > 0', $captured[0]);
+        $this->assertStringContainsString('vw_ranked_entries', $captured[0]);
+    }
+
+    public function test_get_paginated_groups_returns_populated_rows(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = [];
+
+        $grpRow = new \stdClass();
+        $grpRow->q      = 3651068;
+        $grpRow->title  = 'Calvin and the Colonel';
+        $grpRow->year   = 1961;
+        $grpRow->image  = null;
+        $grpRow->type_q = null;
+        $grpRow->cnt    = 7;
+
+        // Sequence:
+        //   1. group list SELECT
+        //   2. populate_groups_batch totals SELECT
+        //   3. populate_groups_batch ranked SELECT
+        $totalsRow = (object) ['group_q' => 3651068, 'cnt' => 7];
+
+        $entryRow = new \stdClass();
+        $entryRow->q         = 111151773;
+        $entryRow->title     = 'The Television Job';
+        $entryRow->image     = null;
+        $entryRow->year      = 1961;
+        $entryRow->minutes   = 30;
+        $entryRow->sites     = 1;
+        $entryRow->ts        = '20260514000000';
+        $entryRow->ts_added  = '2026-05-14 00:00:00';
+        $entryRow->primary_type_q = 21191270;
+        $entryRow->files     = '[]';
+        $entryRow->is_silent = 0;
+        $entryRow->_bucket   = 3651068;
+        $entryRow->_rn       = 1;
+
+        $this->stubSqlSequence(
+            $tfc,
+            [
+                $this->makeResult([$grpRow]),
+                $this->makeResult([$totalsRow]),
+                $this->makeResult([$entryRow]),
+            ],
+            $captured,
+        );
+
+        $out = $ws->get_paginated_groups(0, 10);
+
+        $this->assertCount(1, $out);
+        $this->assertSame(3651068, $out[0]['q']);
+        $this->assertSame('Calvin and the Colonel', $out[0]['title']);
+        $this->assertSame(1961, $out[0]['year']);
+        $this->assertSame(7, $out[0]['total']);
+        $this->assertCount(1, $out[0]['entries']);
+        $this->assertSame(111151773, (int) $out[0]['entries'][0]->q);
+        // Helper columns must not leak through.
+        $this->assertObjectNotHasProperty('_bucket', $out[0]['entries'][0]);
+        $this->assertObjectNotHasProperty('_rn',     $out[0]['entries'][0]);
+    }
+
+    // ------------------------------------------------------------------
     // search_entries() with a non-empty query issues a SQL query and
     // returns the result rows (with fix_item_image applied).
     // ------------------------------------------------------------------

@@ -66,6 +66,14 @@ if ( $action=='get_entry' ) {
 	}
 } else if ( $action=='get_all_sections' ) {
 	$out['data'] = $ws->get_top_sections(PHP_INT_MAX);
+} else if ( $action=='get_paginated_sections' ) {
+	$offset = max(0, (int) $ws->tfc->getRequest('offset', 0));
+	$limit  = max(0, min(100, (int) $ws->tfc->getRequest('limit', 10)));
+	$out['data'] = $ws->get_paginated_sections($offset, $limit);
+} else if ( $action=='get_paginated_groups' ) {
+	$offset = max(0, (int) $ws->tfc->getRequest('offset', 0));
+	$limit  = max(0, min(100, (int) $ws->tfc->getRequest('limit', 10)));
+	$out['data'] = $ws->get_paginated_groups($offset, $limit);
 } else if ( $action=='get_your_list' ) {
 	try {
 		$user_id = $widar->get_user_id()*1;
@@ -148,6 +156,7 @@ if ( $action=='get_entry' ) {
 #   cached.
 $public_cacheable  = [ 'get_all_sections', 'get_section', 'get_person',
                        'get_group',
+                       'get_paginated_sections', 'get_paginated_groups',
                        'get_items_by_year', 'get_candidate_items', 'search',
                        'get_special' ];
 $private_cacheable = [ 'get_entry' ];
