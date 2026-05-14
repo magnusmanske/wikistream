@@ -1249,6 +1249,7 @@ class WikiStream
 	public function backfill_group_items(): void
 	{
 		if (empty($this->config->group_membership_prop)) {
+			print "backfill_group_items: group_membership_prop is 0 — nothing to do\n";
 			return;
 		}
 		$sql = "SELECT `q` FROM `item`";
@@ -1259,8 +1260,13 @@ class WikiStream
 		}
 		$this->freeResult($result);
 		if (empty($qs)) {
+			print "backfill_group_items: item table is empty\n";
 			return;
 		}
+		$totalItems = count($qs);
+		$loadedItems = 0;
+		$totalRows = 0;
+		print "backfill_group_items: processing {$totalItems} items\n";
 		foreach (array_chunk($qs, 50) as $chunk) {
 			$wil = $this->loadWikidataItemList($chunk);
 			$group_items = [];
@@ -1269,10 +1275,12 @@ class WikiStream
 				if (!isset($item)) {
 					continue;
 				}
+				$loadedItems++;
 				foreach ($this->extract_group_item_rows($item, $q_numeric) as $row) {
 					$group_items[] = $row;
 				}
 			}
+			$totalRows += count($group_items);
 			$this->beginTransaction();
 			try {
 				$qList = implode(",", $chunk);
@@ -1290,6 +1298,7 @@ class WikiStream
 				throw $e;
 			}
 		}
+		print "backfill_group_items: loaded {$loadedItems}/{$totalItems} items from Wikidata, wrote {$totalRows} group_item rows\n";
 		$this->import_missing_groups();
 	}
 
