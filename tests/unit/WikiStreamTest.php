@@ -517,6 +517,156 @@ final class WikiStreamTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // get_sibling_group_entries() — fetch other items in the same
+    // group(s) as the given item (e.g. other episodes of the same series).
+    // ------------------------------------------------------------------
+
+    /**
+     * Build a fake sibling row as the JOIN query would produce.
+     */
+    private function siblingRow(int $group_q, string $group_title, int $q, string $title, $position = null): \stdClass
+    {
+        $row = new \stdClass();
+        $row->group_q        = $group_q;
+        $row->group_title    = $group_title;
+        $row->q              = $q;
+        $row->title          = $title;
+        $row->image          = null;
+        $row->year           = null;
+        $row->minutes        = null;
+        $row->sites          = 1;
+        $row->ts             = '20260514000000';
+        $row->ts_added       = '2026-05-14 00:00:00';
+        $row->primary_type_q = 21191270;
+        $row->files          = '[]';
+        $row->is_silent      = 0;
+        $row->group_position = $position;
+        return $row;
+    }
+
+    public function test_get_sibling_group_entries_returns_empty_array_when_no_rows(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->method('getSQL')->willReturn($this->emptyResult());
+
+        $this->assertSame([], $ws->get_sibling_group_entries(123));
+    }
+
+    public function test_get_sibling_group_entries_returns_empty_for_invalid_q(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->expects($this->never())->method('getSQL');
+
+        $this->assertSame([], $ws->get_sibling_group_entries(0));
+        $this->assertSame([], $ws->get_sibling_group_entries(-5));
+    }
+
+    public function test_get_sibling_group_entries_emits_sql_that_excludes_current_item(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $captured = '';
+        $tfc->expects($this->once())
+            ->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->get_sibling_group_entries(42);
+
+        $this->assertStringContainsString('group_item', $captured);
+        $this->assertStringContainsString('vw_ranked_entries', $captured);
+        $normalized = str_replace([' ', '`'], '', $captured);
+        // Current item is excluded from the sibling list
+        $this->assertStringContainsString('item_q!=42', $normalized);
+        // The sibling set is scoped to groups the current item belongs to
+        $this->assertStringContainsString('item_q=42', $normalized);
+    }
+
+    public function test_get_sibling_group_entries_groups_rows_by_group_q(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $rows = [
+            $this->siblingRow(100, 'Series A', 11, 'A-Ep-1', 1),
+            $this->siblingRow(100, 'Series A', 12, 'A-Ep-2', 2),
+            $this->siblingRow(200, 'Series B', 21, 'B-Ep-1', 1),
+        ];
+        $tfc->method('getSQL')->willReturn($this->makeResult($rows));
+
+        $groups = $ws->get_sibling_group_entries(42);
+
+        $this->assertCount(2, $groups);
+        $this->assertSame(100, (int) $groups[0]->q);
+        $this->assertSame('Series A', $groups[0]->title);
+        $this->assertSame(2, $groups[0]->total);
+        $this->assertCount(2, $groups[0]->entries);
+        $this->assertSame(11, (int) $groups[0]->entries[0]->q);
+        $this->assertSame(12, (int) $groups[0]->entries[1]->q);
+
+        $this->assertSame(200, (int) $groups[1]->q);
+        $this->assertSame('Series B', $groups[1]->title);
+        $this->assertSame(1, $groups[1]->total);
+        $this->assertCount(1, $groups[1]->entries);
+        $this->assertSame(21, (int) $groups[1]->entries[0]->q);
+    }
+
+    public function test_get_sibling_group_entries_strips_join_only_fields_from_entries(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $rows = [$this->siblingRow(100, 'Series A', 11, 'A-Ep-1', 1)];
+        $tfc->method('getSQL')->willReturn($this->makeResult($rows));
+
+        $groups = $ws->get_sibling_group_entries(42);
+        $entry  = $groups[0]->entries[0];
+
+        // JOIN-only columns must not leak into the per-entry shape consumed by <entry-thumb>
+        $this->assertObjectNotHasProperty('group_q', $entry);
+        $this->assertObjectNotHasProperty('group_title', $entry);
+        $this->assertObjectNotHasProperty('group_position', $entry);
+        // Standard entry fields are preserved
+        $this->assertSame(11, (int) $entry->q);
+        $this->assertSame('A-Ep-1', $entry->title);
+        $this->assertSame(21191270, (int) $entry->primary_type_q);
+    }
+
+    public function test_get_sibling_group_entries_decodes_files_via_fix_item_image(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $row = $this->siblingRow(100, 'Series A', 11, 'A-Ep-1', 1);
+        $row->files = '[{"property":10,"key":"Some_file.webm","is_trailer":0,"minutes":12}]';
+        $tfc->method('getSQL')->willReturn($this->makeResult([$row]));
+
+        $groups = $ws->get_sibling_group_entries(42);
+        $entry  = $groups[0]->entries[0];
+
+        // fix_item_image json_decodes the `files` field
+        $this->assertIsArray($entry->files);
+        $this->assertSame(10, (int) $entry->files[0]->property);
+    }
+
+    public function test_get_sibling_group_entries_casts_q_safely(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $captured = '';
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        // SQL-injection-style payload must be reduced to the leading int
+        $ws->get_sibling_group_entries('42); DROP TABLE `group_item`;--');
+
+        $this->assertStringNotContainsString('DROP', $captured);
+        $this->assertStringContainsString('42', $captured);
+    }
+
+    // ------------------------------------------------------------------
     // get_total_candidate_items() returns the integer total from the DB.
     // ------------------------------------------------------------------
 

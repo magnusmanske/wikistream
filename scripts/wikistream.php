@@ -271,8 +271,55 @@ class WikiStream
 			}
 		}
 		$ret->sections = $this->populate_sections_batch($sections, $itemsByQ);
+		$ret->groups = $this->get_sibling_group_entries($q);
 
 		return $ret;
+	}
+
+	// Returns the other items that share at least one group_item.group_q with
+	// the given item — e.g. other episodes of the same series, or other
+	// works in the same film franchise. Result is grouped by group_q so the
+	// frontend can render one <section-row> per group.
+	//
+	// Output shape: array of objects { q: <group_q>, title, total, entries }
+	// where each entry matches the columns of vw_ranked_entries (compatible
+	// with <entry-thumb>). The current item is never included in its own
+	// sibling list.
+	public function get_sibling_group_entries($q): array
+	{
+		$q = (int) $q;
+		if ($q <= 0) {
+			return [];
+		}
+		$sql =
+			"SELECT gi.`group_q` AS `group_q`, g.`title` AS `group_title`, " .
+			"vr.*, gi.`position` AS `group_position` " .
+			"FROM `group_item` gi " .
+			"JOIN `group` g ON g.`q`=gi.`group_q` " .
+			"JOIN `vw_ranked_entries` vr ON vr.`q`=gi.`item_q` " .
+			"WHERE gi.`group_q` IN (SELECT `group_q` FROM `group_item` WHERE `item_q`={$q}) " .
+			"AND gi.`item_q`!={$q} " .
+			"ORDER BY gi.`group_q`, gi.`position` IS NULL, gi.`position`, gi.`item_q`";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		$byGroup = [];
+		while ($o = $result->fetch_object()) {
+			$group_q = (int) $o->group_q;
+			$group_title = $o->group_title;
+			unset($o->group_q, $o->group_title, $o->group_position);
+			$this->fix_item_image($o);
+			if (!isset($byGroup[$group_q])) {
+				$byGroup[$group_q] = (object) [
+					"q" => $group_q,
+					"title" => $group_title,
+					"total" => 0,
+					"entries" => [],
+				];
+			}
+			$byGroup[$group_q]->entries[] = $o;
+			$byGroup[$group_q]->total++;
+		}
+		$this->freeResult($result);
+		return array_values($byGroup);
 	}
 
 	protected function get_items_in_db(): array
