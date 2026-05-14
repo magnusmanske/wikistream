@@ -260,6 +260,7 @@ AS SELECT
    `vw_ranked_entries_blacklist`.`image` AS `image`,
    `vw_ranked_entries_blacklist`.`sites` AS `sites`,
    `vw_ranked_entries_blacklist`.`ts` AS `ts`,
+   `vw_ranked_entries_blacklist`.`primary_type_q` AS `primary_type_q`,
    `vw_ranked_entries_blacklist`.`files` AS `files`,(select count(0)
 FROM `section` where `section`.`property` = 136 and `section`.`section_q` = 226730 and `section`.`item_q` = `vw_most_popular_items_played`.`q`) AS `is_silent` from (`vw_most_popular_items_played` join `vw_ranked_entries_blacklist`) where `vw_most_popular_items_played`.`q` = `vw_ranked_entries_blacklist`.`q` order by `vw_most_popular_items_played`.`cnt` desc,`vw_most_popular_items_played`.`q`;
 
@@ -297,6 +298,7 @@ AS SELECT
    `vw_ranked_entries`.`sites` AS `sites`,
    `vw_ranked_entries`.`ts` AS `ts`,
    `vw_ranked_entries`.`ts_added` AS `ts_added`,
+   `vw_ranked_entries`.`primary_type_q` AS `primary_type_q`,
    `vw_ranked_entries`.`files` AS `files`,(select count(0)
 FROM `section` where `section`.`property` = 136 and `section`.`section_q` = 226730 and `section`.`item_q` = `vw_ranked_entries`.`q`) AS `is_silent` from `vw_ranked_entries` where !(`vw_ranked_entries`.`q` in (select `blacklist`.`q` from `blacklist`)) order by `vw_ranked_entries`.`sites` desc,`vw_ranked_entries`.`minutes` desc,`vw_ranked_entries`.`q`;
 
@@ -329,6 +331,7 @@ AS SELECT
    `item`.`image` AS `image`,
    `item`.`sites` AS `sites`,
    `item`.`ts` AS `ts`,
+   `item`.`primary_type_q` AS `primary_type_q`,
    `vw_file`.`j` AS `files`,(select count(0)
 FROM `section` where `section`.`property` = 136 and `section`.`section_q` = 226730 and `section`.`item_q` = `item`.`q`) AS `is_silent` from (`item` join `vw_file`) where `vw_file`.`item_q` = `item`.`q` order by `item`.`ts` desc,`item`.`minutes` desc,`item`.`q`;
 
@@ -346,6 +349,7 @@ AS SELECT
    `item`.`sites` AS `sites`,
    `item`.`ts` AS `ts`,
    `item`.`ts_added` AS `ts_added`,
+   `item`.`primary_type_q` AS `primary_type_q`,
    `vw_file`.`j` AS `files`,(select count(0)
 FROM `section` where `section`.`property` = 136 and `section`.`section_q` = 226730 and `section`.`item_q` = `item`.`q`) AS `is_silent` from (`item` join `vw_file`) where `vw_file`.`item_q` = `item`.`q` order by `item`.`sites` desc,`item`.`minutes` desc,`item`.`q`;
 

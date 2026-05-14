@@ -1535,4 +1535,256 @@ final class WikiStreamTest extends TestCase
 
         $this->assertSame(\WikiStream::P953_COMMANDS_PER_RUN, count($ws->capturedCommands));
     }
+
+    // ------------------------------------------------------------------
+    // Episode / group ingestion
+    //
+    // 1. add_item_details derives item.primary_type_q from P31, preferring
+    //    matches in $config->episode_type_qs.
+    // 2. add_item_details collects (group_q, item_q, position) tuples from
+    //    $config->group_membership_prop, reading the position from the
+    //    P1545 series-ordinal qualifier.
+    // 3. update_from_sparql only runs episode_sparql queries when
+    //    $config->include_episodes is true.
+    // ------------------------------------------------------------------
+
+    /**
+     * Build a Wikidata claim object whose target is an item Q-id.
+     */
+    private function makeItemClaim(string $targetQ, ?string $ordinal = null): object
+    {
+        $claim = new \stdClass();
+        $claim->rank = 'normal';
+        $claim->mainsnak = new \stdClass();
+        $claim->mainsnak->datavalue = new \stdClass();
+        $claim->mainsnak->datavalue->value = (object) [
+            'entity-type' => 'item',
+            'numeric-id'  => (int) preg_replace('/\D/', '', $targetQ),
+            'id'          => $targetQ,
+        ];
+        $claim->mainsnak->datavalue->type = 'wikibase-entityid';
+        if ($ordinal !== null) {
+            $claim->qualifiers = new \stdClass();
+            $qual = new \stdClass();
+            $qual->datavalue = new \stdClass();
+            $qual->datavalue->value = $ordinal;
+            $qual->datavalue->type  = 'string';
+            $claim->qualifiers->P1545 = [$qual];
+        }
+        return $claim;
+    }
+
+    /**
+     * Build a WikidataItem stub with the given P31/P179/etc. claim map.
+     * `getTarget` returns the target Q-id of a claim (mirrors the real
+     * helper). All file-prop claim arrays default to empty.
+     */
+    private function makeClaimsItem(int $q, array $claimsByProp): \WikidataItem
+    {
+        return new class($q, $claimsByProp) extends \WikidataItem {
+            private array $claimsByProp;
+            public function __construct(int $q, array $claimsByProp)
+            {
+                parent::__construct((object) ['id' => "Q{$q}", 'labels' => new \stdClass()]);
+                $this->claimsByProp = $claimsByProp;
+            }
+            public function getClaims(string|int $prop): array
+            {
+                $key = (int) preg_replace('/\D/', '', (string) $prop);
+                return $this->claimsByProp[$key] ?? [];
+            }
+            public function getTarget(object $claim): string
+            {
+                return $claim->mainsnak->datavalue->value->id ?? '';
+            }
+        };
+    }
+
+    /**
+     * Invoke the protected add_item_details with by-reference buffers and
+     * an extra `$group_items` buffer the new implementation must accept.
+     * Returns the buffers so tests can assert on them.
+     *
+     * @SuppressWarnings(PHPMD.ShortVariable)
+     */
+    private function invokeAddItemDetails(\WikiStream $ws, \WikidataItemList $wil, int $q): array
+    {
+        $qs = $sections = $entry_files = $items_for_labels = $item_rows = $group_items = [];
+        $invoke = function ($wil, $q, &$qs, &$sections, &$entry_files, &$items_for_labels, &$item_rows, &$group_items) {
+            $this->add_item_details($wil, $q, $qs, $sections, $entry_files, $items_for_labels, $item_rows, $group_items);
+        };
+        $invoke = $invoke->bindTo($ws, \WikiStream::class);
+        $invoke($wil, $q, $qs, $sections, $entry_files, $items_for_labels, $item_rows, $group_items);
+        return [
+            'qs'           => $qs,
+            'sections'     => $sections,
+            'entry_files'  => $entry_files,
+            'item_rows'    => $item_rows,
+            'group_items'  => $group_items,
+        ];
+    }
+
+    public function test_add_item_details_primary_type_q_uses_episode_match_when_present(): void
+    {
+        // Item has two P31 claims: Q11424 (film) AND Q21191270 (episode).
+        // Because Q21191270 is in episode_type_qs, primary_type_q must be 21191270.
+        [$ws] = $this->makeWikiStream();
+        $item = $this->makeClaimsItem(5583524, [
+            31 => [
+                $this->makeItemClaim('Q11424'),
+                $this->makeItemClaim('Q21191270'),
+            ],
+        ]);
+        $wil = new \WikidataItemList();
+        $wil->setItem(5583524, $item);
+
+        $out = $this->invokeAddItemDetails($ws, $wil, 5583524);
+
+        $this->assertCount(1, $out['item_rows']);
+        $row = $out['item_rows'][0];
+        // item_rows is a list of SQL VALUES tuples. We accept any
+        // representation that names primary_type_q=21191270 in the row.
+        $this->assertStringContainsString('21191270', $row);
+    }
+
+    public function test_add_item_details_primary_type_q_falls_back_to_first_p31_when_no_episode_match(): void
+    {
+        // Only P31=Q11424 (film). Result must be 11424.
+        [$ws] = $this->makeWikiStream();
+        $item = $this->makeClaimsItem(123, [
+            31 => [$this->makeItemClaim('Q11424')],
+        ]);
+        $wil = new \WikidataItemList();
+        $wil->setItem(123, $item);
+
+        $out = $this->invokeAddItemDetails($ws, $wil, 123);
+
+        $this->assertCount(1, $out['item_rows']);
+        $this->assertStringContainsString('11424', $out['item_rows'][0]);
+    }
+
+    public function test_add_item_details_primary_type_q_is_null_when_no_p31(): void
+    {
+        [$ws] = $this->makeWikiStream();
+        $item = $this->makeClaimsItem(456, []);
+        $wil = new \WikidataItemList();
+        $wil->setItem(456, $item);
+
+        $out = $this->invokeAddItemDetails($ws, $wil, 456);
+
+        $this->assertCount(1, $out['item_rows']);
+        // The item_rows tuple must encode primary_type_q as SQL NULL.
+        $this->assertMatchesRegularExpression('/,NULL\)$/i', $out['item_rows'][0]);
+    }
+
+    public function test_add_item_details_collects_group_item_with_position_from_p1545(): void
+    {
+        // Episode of Mr. Bean (Q484020), ordinal "13".
+        [$ws] = $this->makeWikiStream();
+        $item = $this->makeClaimsItem(5583524, [
+            31  => [$this->makeItemClaim('Q21191270')],
+            179 => [$this->makeItemClaim('Q484020', ordinal: '13')],
+        ]);
+        $wil = new \WikidataItemList();
+        $wil->setItem(5583524, $item);
+
+        $out = $this->invokeAddItemDetails($ws, $wil, 5583524);
+
+        $this->assertCount(1, $out['group_items'], 'one P179 → one group_item row');
+        $tuple = $out['group_items'][0];
+        // Tuple format: (group_q, item_q, position-or-NULL)
+        $this->assertStringContainsString('484020',  $tuple);
+        $this->assertStringContainsString('5583524', $tuple);
+        $this->assertMatchesRegularExpression('/,\s*13(\.0+)?\)$/', $tuple);
+    }
+
+    public function test_add_item_details_group_item_position_null_for_non_numeric_ordinal(): void
+    {
+        // Some series use "S01E13"-style ordinals — store position as NULL.
+        [$ws] = $this->makeWikiStream();
+        $item = $this->makeClaimsItem(5583524, [
+            31  => [$this->makeItemClaim('Q21191270')],
+            179 => [$this->makeItemClaim('Q484020', ordinal: 'S01E13')],
+        ]);
+        $wil = new \WikidataItemList();
+        $wil->setItem(5583524, $item);
+
+        $out = $this->invokeAddItemDetails($ws, $wil, 5583524);
+
+        $this->assertCount(1, $out['group_items']);
+        $this->assertMatchesRegularExpression('/,NULL\)$/i', $out['group_items'][0]);
+    }
+
+    public function test_add_item_details_skips_group_collection_when_membership_prop_disabled(): void
+    {
+        // With WikiVibes (group_membership_prop=0), P179 must NOT be collected
+        // into group_items even if the item claims it.
+        $config = new \WikiStreamConfigWikiVibes();
+        $db  = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $ws  = new \WikiStream($config, $tfc);
+
+        $item = $this->makeClaimsItem(789, [
+            31  => [$this->makeItemClaim('Q11424')],
+            179 => [$this->makeItemClaim('Q484020', ordinal: '1')],
+        ]);
+        $wil = new \WikidataItemList();
+        $wil->setItem(789, $item);
+
+        $out = $this->invokeAddItemDetails($ws, $wil, 789);
+        $this->assertSame([], $out['group_items']);
+    }
+
+    public function test_update_from_sparql_includes_episode_queries_when_switch_on(): void
+    {
+        $config = new class extends \WikiStreamConfigWikiFlix {
+            public $sparql = ['SELECT ?q { ?q wdt:P31 wd:Q11424 }'];
+            public $episode_sparql = ['SELECT ?q { ?q wdt:P31 wd:Q21191270 }'];
+            public $bad_genres = [];
+            public $include_episodes = true;
+        };
+
+        $callsBySparql = [];
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($this->makeFakeDb());
+        $tfc->method('getSPARQL_TSV')->willReturnCallback(function (string $sparql) use (&$callsBySparql) {
+            $callsBySparql[] = $sparql;
+            return [];
+        });
+        $tfc->method('getSQL')->willReturn($this->emptyResult());
+
+        $ws = new \WikiStream($config, $tfc);
+        $ws->update_from_sparql();
+
+        $joined = implode("\n", $callsBySparql);
+        $this->assertStringContainsString('wd:Q11424',    $joined, 'main SPARQL must run');
+        $this->assertStringContainsString('wd:Q21191270', $joined, 'episode SPARQL must run when include_episodes=true');
+    }
+
+    public function test_update_from_sparql_skips_episode_queries_when_switch_off(): void
+    {
+        $config = new class extends \WikiStreamConfigWikiFlix {
+            public $sparql = ['SELECT ?q { ?q wdt:P31 wd:Q11424 }'];
+            public $episode_sparql = ['SELECT ?q { ?q wdt:P31 wd:Q21191270 }'];
+            public $bad_genres = [];
+            public $include_episodes = false;
+        };
+
+        $callsBySparql = [];
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($this->makeFakeDb());
+        $tfc->method('getSPARQL_TSV')->willReturnCallback(function (string $sparql) use (&$callsBySparql) {
+            $callsBySparql[] = $sparql;
+            return [];
+        });
+        $tfc->method('getSQL')->willReturn($this->emptyResult());
+
+        $ws = new \WikiStream($config, $tfc);
+        $ws->update_from_sparql();
+
+        $joined = implode("\n", $callsBySparql);
+        $this->assertStringContainsString('wd:Q11424',    $joined, 'main SPARQL must still run');
+        $this->assertStringNotContainsString('wd:Q21191270', $joined, 'episode SPARQL must be skipped');
+    }
 }

@@ -336,4 +336,63 @@ final class ConfigTest extends TestCase
         $config = new \WikiStreamConfigWikiVibes();
         $this->assertSame('P175', $config->interface_config['performer_prop']);
     }
+
+    // ------------------------------------------------------------------
+    // Episode / group ingestion config
+    //
+    // The base class declares a small set of fields that gate the
+    // episode/series feature. WikiFlix turns it on (TV episodes via
+    // P179 + P1545); WikiVibes leaves it off until the audio-grouping
+    // work in #3/#4 lands.
+    // ------------------------------------------------------------------
+
+    public function test_base_config_defaults_episodes_off(): void
+    {
+        $config = new \WikiStreamConfigWikiVibes();
+        $this->assertFalse($config->include_episodes);
+        $this->assertSame([], $config->episode_sparql);
+        $this->assertSame(0, $config->group_membership_prop);
+        $this->assertSame(0, $config->group_position_qualifier);
+        $this->assertSame([], $config->episode_type_qs);
+    }
+
+    public function test_wikiflix_enables_episodes(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $this->assertTrue($config->include_episodes);
+    }
+
+    public function test_wikiflix_episode_sparql_is_nonempty(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $this->assertNotEmpty($config->episode_sparql);
+        foreach ($config->episode_sparql as $sparql) {
+            $this->assertIsString($sparql);
+            $this->assertNotEmpty($sparql);
+        }
+    }
+
+    public function test_wikiflix_uses_p179_for_grouping(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $this->assertSame(179,  $config->group_membership_prop);
+        $this->assertSame(1545, $config->group_position_qualifier);
+    }
+
+    public function test_wikiflix_episode_type_qs_includes_television_series_episode(): void
+    {
+        // Q21191270 = television series episode
+        $config = new \WikiStreamConfigWikiFlix();
+        $this->assertContains(21191270, $config->episode_type_qs);
+        $this->assertContainsOnly('int', $config->episode_type_qs);
+    }
+
+    public function test_wikiflix_interface_config_exposes_episode_type_qs(): void
+    {
+        // The frontend reads this list from window.config.misc to decide
+        // when to render the "episode" badge on a thumbnail.
+        $config = new \WikiStreamConfigWikiFlix();
+        $this->assertArrayHasKey('episode_type_qs', $config->interface_config);
+        $this->assertContains(21191270, $config->interface_config['episode_type_qs']);
+    }
 }

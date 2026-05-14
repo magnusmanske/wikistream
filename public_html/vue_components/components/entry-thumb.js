@@ -28,6 +28,16 @@ export default {
         );
         const is_fav = computed(() => isFavorite(props.entry && props.entry.q));
 
+        // Episode badge: server stamps item.primary_type_q during
+        // ingestion; config.misc.episode_type_qs lists the Q-IDs that
+        // count as episodes for this tool. Empty list = badge disabled.
+        const is_episode = computed(() => {
+            const type_q = props.entry && Number(props.entry.primary_type_q);
+            if (!type_q) return false;
+            const types = (window.config && window.config.misc && window.config.misc.episode_type_qs) || [];
+            return types.includes(type_q);
+        });
+
         function onHeartClick() {
             if (props.entry && props.entry.q) toggleFavorite(props.entry.q);
         }
@@ -38,7 +48,7 @@ export default {
             prefetchStart(`./api.php?action=get_entry&q=${encodeURIComponent(q)}`);
         }
 
-        return { logged_in, is_fav, onHeartClick, onHoverStart, prefetchCancel };
+        return { logged_in, is_fav, is_episode, onHeartClick, onHoverStart, prefetchCancel };
     },
     methods: {
         missing_icon() {
@@ -72,6 +82,14 @@ export default {
                     <i v-if="is_fav" class="bi bi-heart-fill"></i>
                     <i v-else class="bi bi-heart"></i>
                 </button>
+                <span
+                    v-if="is_episode"
+                    class="entry-thumb-type-badge"
+                    tt_title="series_episode"
+                    aria-label="Series episode"
+                >
+                    <i class="bi bi-tv-fill"></i>
+                </span>
                 <div class="legend">
                     {{entry.title}}
                     <div>

@@ -1,5 +1,34 @@
 <?php class WikiStreamConfig
 {
+	# Master switch for episode/track-style ingestion. When false (the
+	# default), $episode_sparql is ignored entirely. Toggling this off
+	# stops *new* episodes from being discovered but does not purge any
+	# already-ingested rows — that's a separate operation.
+	public $include_episodes = false;
+
+	# SPARQL queries that discover episode-like items (TV episodes,
+	# tracks, movements). Run alongside $sparql, but only when
+	# $include_episodes is true. Kept separate so the toggle is a
+	# one-liner and the queries can be reviewed independently.
+	public $episode_sparql = [];
+
+	# Property linking an item to its parent group (e.g. P179 series for
+	# WikiFlix episodes, P361 part-of for WikiVibes tracks). 0 disables
+	# group ingestion. Independent from $include_episodes — films can
+	# also belong to a film series.
+	public $group_membership_prop = 0;
+
+	# Statement qualifier on the group_membership_prop claim carrying
+	# the item's position within the group (P1545 series ordinal). 0
+	# means positions are not recorded.
+	public $group_position_qualifier = 0;
+
+	# Q-numbers whose presence as the item's primary P31 marks the item
+	# as an "episode" for UI purposes (drives the thumbnail badge). Also
+	# used during ingestion to prefer the episode P31 when an item has
+	# multiple instance-of claims.
+	public $episode_type_qs = [];
+
 	/// Returns an instance of the appropriate config class, as per the config.js file in the tool root directory
 	function get_config_instance(): self
 	{
@@ -107,12 +136,59 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig
 	public $file_props = [10, 724, 1651, 4015, 11731];
 	public $bad_sections = [11424];
 	public $skip_section_q = [838368, 226730];
+
+	# Episode ingestion (GitHub issue #5). Episodes are matched as
+	# P31/P279* descendants of Q21191270 ("television series episode")
+	# and admitted under the same media + PD/CC rules as films. Series
+	# membership (P179) plus its P1545 ordinal qualifier populate the
+	# `group` / `group_item` tables.
+	public $include_episodes = true;
+	public $group_membership_prop = 179;
+	public $group_position_qualifier = 1545;
+	public $episode_type_qs = [21191270]; # television series episode
+	public $episode_sparql = [
+		# Public-domain TV episodes with playable media. The structural
+		# constraints mirror SPARQL #1 in $sparql but anchor on
+		# Q21191270 (P279*) so subclasses (anime episode etc.) qualify.
+		"SELECT DISTINCT ?q {
+			?q (wdt:P31/(wdt:P279*)) wd:Q21191270 ; wdt:P6216/(wdt:P279*) wd:Q19652 .
+			OPTIONAL { ?q wdt:P724 ?ia }
+			OPTIONAL { ?q wdt:P10 ?commons }
+			OPTIONAL { ?q wdt:P1651 ?youtube }
+			OPTIONAL { ?q wdt:P4015 ?vimeo }
+			OPTIONAL { ?q wdt:P11731 ?dailymotion }
+			BIND(BOUND(?ia)||BOUND(?commons)||BOUND(?youtube)||BOUND(?vimeo)||BOUND(?dailymotion) as ?hasMedia)
+			FILTER(?hasMedia=true)
+		}",
+		# CC-licensed (except ND) TV episodes with playable media.
+		# Same ND exclusion logic as SPARQL #4 in $sparql.
+		"SELECT DISTINCT ?q {
+			?q (wdt:P31/(wdt:P279*)) wd:Q21191270 ;
+			   wdt:P275 ?lic .
+			?lic wdt:P31 wd:Q284742 .
+			MINUS {
+				?q wdt:P275 ?nd_lic .
+				?nd_lic rdfs:label ?nd_label .
+				FILTER(LANG(?nd_label) = \"en\")
+				FILTER(CONTAINS(LCASE(?nd_label), \"noderiv\"))
+			}
+			OPTIONAL { ?q wdt:P724 ?ia }
+			OPTIONAL { ?q wdt:P10 ?commons }
+			OPTIONAL { ?q wdt:P1651 ?youtube }
+			OPTIONAL { ?q wdt:P4015 ?vimeo }
+			OPTIONAL { ?q wdt:P11731 ?dailymotion }
+			BIND(BOUND(?ia)||BOUND(?commons)||BOUND(?youtube)||BOUND(?vimeo)||BOUND(?dailymotion) as ?hasMedia)
+			FILTER(?hasMedia=true)
+		}",
+	];
+
 	public $interface_config = [
 		"missing_icon" => "Missing-image-232x150.png",
 		"toolname" => "wikiflix",
 		"performer_prop" => "P161",
 		"associated_people_props" => [57],
 		"help_page" => "https://www.wikidata.org/wiki/Help:WikiFlix",
+		"episode_type_qs" => [21191270],
 	];
 
 	public function add_special_sections(&$ws, &$out): void
@@ -204,6 +280,7 @@ class WikiStreamConfigWikiVibes extends WikiStreamConfig
 		"performer_prop" => "P175",
 		"associated_people_props" => [],
 		"help_page" => "https://www.wikidata.org/wiki/Help:WikiVibes",
+		"episode_type_qs" => [],
 	];
 
 	public function add_special_sections(&$ws, &$out): void

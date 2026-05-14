@@ -380,8 +380,16 @@ class WikiStream
 		$new_qs = [];
 		$existing_qs = $this->get_items_in_db();
 
+		# Always run the configured queries; opt in to episode discovery
+		# via $config->include_episodes. The split keeps the toggle
+		# trivial (no SPARQL editing required to disable episodes).
+		$queries = $this->config->sparql;
+		if (!empty($this->config->include_episodes) && !empty($this->config->episode_sparql)) {
+			$queries = array_merge($queries, $this->config->episode_sparql);
+		}
+
 		# All entries with a file on Commons
-		foreach ($this->config->sparql as $sparql_id => $sparql) {
+		foreach ($queries as $sparql_id => $sparql) {
 			# Filter out bad genres
 			if (
 				isset($this->config->bad_genres) and
@@ -476,7 +484,8 @@ class WikiStream
 		&$sections,
 		&$entry_files,
 		&$items_for_labels = null,
-		&$item_rows = null
+		&$item_rows = null,
+		&$group_items = null
 	): void {
 		$item = $wil->getItem($item_q_numeric);
 		if (!isset($item)) {
@@ -513,6 +522,57 @@ class WikiStream
 			$sections[] = $row;
 		}
 		$qs[] = $item_q_numeric;
+
+		# Primary type: prefer the first P31 value that's in
+		# $episode_type_qs (so an item declared as both film and episode
+		# surfaces as an episode in the UI); otherwise the first P31.
+		# Null when the item has no instance-of claim.
+		$primary_type_q = $this->derive_primary_type_q($item);
+
+		# Group membership: emit (group_q, item_q, position) tuples for
+		# each $group_membership_prop claim, reading the optional
+		# $group_position_qualifier value. Non-numeric ordinals (e.g.
+		# "S01E13") yield NULL position — the value is preserved as-is
+		# only if it parses as a number.
+		if (
+			is_array($group_items)
+			&& !empty($this->config->group_membership_prop)
+		) {
+			$gprop = (int) $this->config->group_membership_prop;
+			$qual_prop = (int) $this->config->group_position_qualifier;
+			foreach ($item->getClaims($gprop) as $claim) {
+				if (isset($claim->rank) && $claim->rank === "deprecated") {
+					continue;
+				}
+				$target_q = $item->getTarget($claim);
+				$group_q_numeric = (int) preg_replace("/\D/", "", (string) $target_q);
+				if ($group_q_numeric <= 0) {
+					continue;
+				}
+				$position_sql = "NULL";
+				if ($qual_prop > 0 && isset($claim->qualifiers)) {
+					$qual_key = "P{$qual_prop}";
+					if (isset($claim->qualifiers->$qual_key)) {
+						foreach ($claim->qualifiers->$qual_key as $qual) {
+							if (!isset($qual->datavalue->value)) {
+								continue;
+							}
+							$raw = $qual->datavalue->value;
+							if (is_numeric($raw)) {
+								// decimal(8,2): cap to avoid silent
+								// MariaDB clamp on absurd values
+								$num = (float) $raw;
+								if (abs($num) < 1e6) {
+									$position_sql = number_format($num, 2, '.', '');
+									break;
+								}
+							}
+						}
+					}
+				}
+				$group_items[] = "({$group_q_numeric},{$item_q_numeric},{$position_sql})";
+			}
+		}
 		# Files
 		foreach ($this->config->file_props as $property) {
 			foreach ($item->getClaims($property) as $c) {
@@ -598,13 +658,14 @@ class WikiStream
 
 		$year_safe = $this->get_earliest_year($item, "P577");
 		$title_safe = $this->db->real_escape_string($item->getLabel());
+		$primary_type_q_safe = $primary_type_q === null ? "NULL" : (int) $primary_type_q;
 
 		// Defer the item UPDATE so the caller can issue one batched
 		// INSERT ... ON DUPLICATE KEY UPDATE for the whole chunk.
 		if (is_array($item_rows)) {
-			$item_rows[] = "({$item_q_numeric},'{$title_safe}',{$year_safe},{$minutes_safe},{$image_safe},{$sites_safe},'{$ts_safe}')";
+			$item_rows[] = "({$item_q_numeric},'{$title_safe}',{$year_safe},{$minutes_safe},{$image_safe},{$sites_safe},'{$ts_safe}',{$primary_type_q_safe})";
 		} else {
-			$sql = "UPDATE `item` set `title`='{$title_safe}',`year`={$year_safe},`minutes`={$minutes_safe},`image`={$image_safe},`sites`={$sites_safe},`ts`='{$ts_safe}' WHERE `q`={$item_q_numeric}";
+			$sql = "UPDATE `item` set `title`='{$title_safe}',`year`={$year_safe},`minutes`={$minutes_safe},`image`={$image_safe},`sites`={$sites_safe},`ts`='{$ts_safe}',`primary_type_q`={$primary_type_q_safe} WHERE `q`={$item_q_numeric}";
 			$this->tfc->getSQL($this->db, $sql);
 		}
 
@@ -625,6 +686,7 @@ class WikiStream
 		$entry_files = [];
 		$items_for_labels = [];
 		$item_rows = [];
+		$group_items = [];
 		foreach ($chunk as $q_numeric) {
 			try {
 				$this->add_item_details(
@@ -635,6 +697,7 @@ class WikiStream
 					$entry_files,
 					$items_for_labels,
 					$item_rows,
+					$group_items,
 				);
 			} catch (BadGenreException $e) {
 				// Expected control flow: item carries a configured bad-genre
@@ -657,6 +720,8 @@ class WikiStream
 			$this->tfc->getSQL($this->db, $sql);
 			$sql = "DELETE FROM `file` WHERE `item_q` IN ($qs)";
 			$this->tfc->getSQL($this->db, $sql);
+			$sql = "DELETE FROM `group_item` WHERE `item_q` IN ($qs)";
+			$this->tfc->getSQL($this->db, $sql);
 
 			# Insert sections
 			if (count($sections) > 0) {
@@ -674,14 +739,25 @@ class WikiStream
 				$this->tfc->getSQL($this->db, $sql);
 			}
 
+			# Insert group memberships. group_item.item_q FKs to item.q,
+			# so this must run after the item upsert below; deferred.
+			# (We've DELETEd the old rows; new rows go in after upsert.)
+
 			# Batched item upsert: one round-trip for the chunk instead of one per item.
 			# Rows that already exist (the expected case here, since we SELECTed from
 			# `item` WHERE available=0) get UPDATEd via ON DUPLICATE KEY UPDATE.
 			if (count($item_rows) > 0) {
 				$sql =
-					"INSERT INTO `item` (`q`,`title`,`year`,`minutes`,`image`,`sites`,`ts`) VALUES " .
+					"INSERT INTO `item` (`q`,`title`,`year`,`minutes`,`image`,`sites`,`ts`,`primary_type_q`) VALUES " .
 					implode(",", $item_rows) .
-					" ON DUPLICATE KEY UPDATE `title`=VALUES(`title`),`year`=VALUES(`year`),`minutes`=VALUES(`minutes`),`image`=VALUES(`image`),`sites`=VALUES(`sites`),`ts`=VALUES(`ts`)";
+					" ON DUPLICATE KEY UPDATE `title`=VALUES(`title`),`year`=VALUES(`year`),`minutes`=VALUES(`minutes`),`image`=VALUES(`image`),`sites`=VALUES(`sites`),`ts`=VALUES(`ts`),`primary_type_q`=VALUES(`primary_type_q`)";
+				$this->tfc->getSQL($this->db, $sql);
+			}
+
+			if (count($group_items) > 0) {
+				$sql =
+					"INSERT IGNORE INTO `group_item` (`group_q`,`item_q`,`position`) VALUES " .
+					implode(",", $group_items);
 				$this->tfc->getSQL($this->db, $sql);
 			}
 
@@ -697,6 +773,37 @@ class WikiStream
 			$this->rollback();
 			throw $e;
 		}
+	}
+
+	/**
+	 * Pick a single canonical instance-of value for an item.
+	 *
+	 * Preference order: first P31 value that's listed in
+	 * $config->episode_type_qs (so an item declared as both film and
+	 * TV episode surfaces as an episode), else the first P31 value in
+	 * claim order. Returns null if the item has no P31 claim.
+	 */
+	protected function derive_primary_type_q($item): ?int
+	{
+		$first = null;
+		$episode_types = array_map('intval', $this->config->episode_type_qs ?? []);
+		foreach ($item->getClaims("P31") as $claim) {
+			if (isset($claim->rank) && $claim->rank === "deprecated") {
+				continue;
+			}
+			$target_q = $item->getTarget($claim);
+			$num = (int) preg_replace("/\D/", "", (string) $target_q);
+			if ($num <= 0) {
+				continue;
+			}
+			if ($first === null) {
+				$first = $num;
+			}
+			if (in_array($num, $episode_types, true)) {
+				return $num;
+			}
+		}
+		return $first;
 	}
 
 	protected function beginTransaction(): void
@@ -985,12 +1092,85 @@ class WikiStream
 		}
 	}
 
+	/**
+	 * Backfill the `group` table for any group_q referenced by
+	 * `group_item` that we don't yet have metadata for. Mirrors the
+	 * shape of import_missing_section_labels — one chunked pass over
+	 * Wikidata, populating title / type_q / image / year.
+	 *
+	 * Title is also written to the `label` table for translation; the
+	 * `group.title` column carries an English fallback for cheap reads.
+	 */
+	public function import_missing_groups(): void
+	{
+		$sql =
+			"SELECT DISTINCT `group_q` AS `q` FROM `group_item` " .
+			"WHERE NOT EXISTS (SELECT 1 FROM `group` WHERE `group`.`q` = `group_item`.`group_q`)";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		$qs = [];
+		while ($o = $result->fetch_object()) {
+			$qs[] = (int) $o->q;
+		}
+		$this->freeResult($result);
+		if (empty($qs)) {
+			return;
+		}
+		foreach (array_chunk($qs, 50) as $chunk) {
+			$wil = new WikidataItemList();
+			$wil->loadItems($chunk);
+			$rows = [];
+			$itemsForLabels = [];
+			foreach ($chunk as $q) {
+				$item = $wil->getItem($q);
+				if (!isset($item)) {
+					continue;
+				}
+				$title_safe = $this->db->real_escape_string($item->getLabel());
+				$type_q = $this->derive_primary_type_q($item);
+				$type_q_sql = $type_q === null ? "NULL" : (int) $type_q;
+				$image = $item->getFirstString("P18");
+				if ($image == "") {
+					$image = $item->getFirstString("P154");
+				}
+				$image_sql = $image == ""
+					? "NULL"
+					: "'" . $this->db->real_escape_string($image) . "'";
+				$year = $this->get_earliest_year($item, "P577");
+				if ($year === "null") {
+					$year_sql = "NULL";
+				} else {
+					$year_sql = (int) $year;
+				}
+				$ts_safe = $this->tfc->getCurrentTimestamp();
+				$rows[] = "({$q},'{$title_safe}',{$type_q_sql},{$image_sql},{$year_sql},'{$ts_safe}')";
+				$itemsForLabels[] = $item;
+			}
+			if (empty($rows)) {
+				continue;
+			}
+			$this->beginTransaction();
+			try {
+				$sql =
+					"INSERT INTO `group` (`q`,`title`,`type_q`,`image`,`year`,`ts`) VALUES " .
+					implode(",", $rows) .
+					" ON DUPLICATE KEY UPDATE `title`=VALUES(`title`),`type_q`=VALUES(`type_q`),`image`=VALUES(`image`),`year`=VALUES(`year`),`ts`=VALUES(`ts`)";
+				$this->tfc->getSQL($this->db, $sql);
+				$this->update_item_labels_batch($itemsForLabels);
+				$this->commit();
+			} catch (\Throwable $e) {
+				$this->rollback();
+				throw $e;
+			}
+		}
+	}
+
 	public function import_missing_section_labels(): void
 	{
 		$sql =
 			"SELECT DISTINCT `section_q` AS `q` FROM `section` WHERE NOT EXISTS (SELECT 1 FROM `label` WHERE `label`.`q` = `section`.`section_q`)" .
 			" UNION SELECT `q` FROM `item` WHERE NOT EXISTS (SELECT 1 FROM `label` WHERE `label`.`q` = `item`.`q`)" .
-			" UNION SELECT `q` FROM `person` WHERE NOT EXISTS (SELECT 1 FROM `label` WHERE `label`.`q` = `person`.`q`)";
+			" UNION SELECT `q` FROM `person` WHERE NOT EXISTS (SELECT 1 FROM `label` WHERE `label`.`q` = `person`.`q`)" .
+			" UNION SELECT `q` FROM `group` WHERE NOT EXISTS (SELECT 1 FROM `label` WHERE `label`.`q` = `group`.`q`)";
 		$result = $this->tfc->getSQL($this->db, $sql);
 		$qs = [];
 		while ($o = $result->fetch_object()) {
@@ -1515,8 +1695,9 @@ class WikiStream
 	public function reset_all(): void
 	{
 		// FK shape:
-		//   section.item_q REFERENCES item.q
-		//   file.item_q    REFERENCES item.q
+		//   section.item_q    REFERENCES item.q
+		//   file.item_q       REFERENCES item.q
+		//   group_item.item_q REFERENCES item.q
 		// Truncating the children (no incoming FKs of their own) is always
 		// fine. For the parent `item`, some MariaDB versions reject TRUNCATE
 		// on a table that any FK references — even when those children are
@@ -1530,6 +1711,10 @@ class WikiStream
 			$this->tfc->getSQL($this->db, $sql);
 			$sql = "TRUNCATE `file`";
 			$this->tfc->getSQL($this->db, $sql);
+			$sql = "TRUNCATE `group_item`";
+			$this->tfc->getSQL($this->db, $sql);
+			$sql = "TRUNCATE `group`";
+			$this->tfc->getSQL($this->db, $sql);
 			$sql = "TRUNCATE `item`";
 			$this->tfc->getSQL($this->db, $sql);
 		} finally {
@@ -1540,11 +1725,14 @@ class WikiStream
 
 	public function purge_items_without_files(): void
 	{
-		// NOT EXISTS form. Section must be cleared before item due to the
-		// FK section.item_q → item.q.
+		// NOT EXISTS form. Children of item.q must be cleared before item:
+		//   section.item_q   → item.q
+		//   group_item.item_q → item.q
 		$this->beginTransaction();
 		try {
 			$sql = "DELETE FROM `section` WHERE NOT EXISTS (SELECT 1 FROM `file` WHERE `file`.`item_q` = `section`.`item_q`)";
+			$this->tfc->getSQL($this->db, $sql);
+			$sql = "DELETE FROM `group_item` WHERE NOT EXISTS (SELECT 1 FROM `file` WHERE `file`.`item_q` = `group_item`.`item_q`)";
 			$this->tfc->getSQL($this->db, $sql);
 			$sql = "DELETE FROM `item` WHERE NOT EXISTS (SELECT 1 FROM `file` WHERE `file`.`item_q` = `item`.`q`)";
 			$this->tfc->getSQL($this->db, $sql);
@@ -2524,6 +2712,10 @@ class WikiStream
 				"DELETE FROM `section` WHERE section_q IN (" .
 				implode(",", $this->config->bad_genres) .
 				") AND property=136";
+			$this->tfc->getSQL($this->db, $sql);
+
+			# Clear group memberships (FK to item)
+			$sql = "DELETE FROM `group_item` WHERE item_q IN (" . implode(",", $qs) . ")";
 			$this->tfc->getSQL($this->db, $sql);
 
 			# Clear items

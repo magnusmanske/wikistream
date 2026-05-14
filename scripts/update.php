@@ -22,6 +22,7 @@ match ($cmd) {
 	'test'                      => print_r($ws->config),
 	'person'                    => $ws->update_persons(),
 	'sec_labels'                => $ws->import_missing_section_labels(),
+	'groups'                    => $ws->import_missing_groups(),
 	'purge_items_without_files' => $ws->purge_items_without_files(),
 	'annotate_ia_movies'        => $ws->annotate_ia_movies(),
 	'annotate_pre_1900_public_domain' => $ws->annotate_pre_1900_public_domain(),
@@ -42,6 +43,7 @@ match ($cmd) {
 		$ws->purge_items_without_files();
 		$ws->remove_unused_people();
 		$ws->update_persons();
+		$ws->import_missing_groups();
 		$ws->import_missing_section_labels();
 		$ws->import_commons_video_minutes();
 		$ws->generate_main_page_data();
