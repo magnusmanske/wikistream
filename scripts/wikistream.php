@@ -727,10 +727,26 @@ class WikiStream
 	}
 
 	/**
-	 * Scan every row in `item` and delete those that no longer satisfy
-	 * the tool's scope (see filter_qs_in_scope()). Counterpart to the
-	 * insertion-time filter: catches items added before the filter
-	 * existed, or whose P31 was retargeted on Wikidata after ingestion.
+	 * Scan `item` and delete rows whose `primary_type_q` is not a P279*
+	 * descendant of any scope root. Counterpart to the insertion-time
+	 * filter: catches items added before the filter existed, or whose
+	 * P31 was retargeted on Wikidata after ingestion.
+	 *
+	 * Strategy: rather than ask WDQS to walk P279* for every item (one
+	 * row per item, batches of 500 → flaky under timeout, because a
+	 * single batch timeout silently drops 500 legit items), collect the
+	 * distinct primary_type_q values (~tens in practice) and run a
+	 * single small SPARQL to classify them. Items whose type is in the
+	 * resulting allow-set are kept; everything else is purged.
+	 *
+	 * Defensive aborts:
+	 *   - empty scope_root_qs   → no-op (scope check disabled).
+	 *   - empty distinct types  → no-op (nothing to classify).
+	 *   - SPARQL returns empty  → abort (likely WDQS issue; refuse to
+	 *                              purge rather than wipe legit items).
+	 *
+	 * Items with NULL `primary_type_q` are left alone (they get
+	 * re-derived on the next add_missing_item_details() pass).
 	 *
 	 * Cascades through `section`, `file`, and `group_item` via
 	 * delete_items_by_q().
@@ -740,22 +756,115 @@ class WikiStream
 		if (empty($this->config->scope_root_qs)) {
 			return;
 		}
-		$all_qs = array_values(array_map('intval', $this->get_items_in_db()));
-		if (empty($all_qs)) {
+
+		// 1. Distinct primary types in the DB. Tiny VALUES set even on
+		//    a large `item` table — production has ~tens of types.
+		$sql = "SELECT DISTINCT `primary_type_q` FROM `item` WHERE `primary_type_q` IS NOT NULL";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		$type_qs = [];
+		while ($o = $result->fetch_object()) {
+			$type_qs[] = (int) $o->primary_type_q;
+		}
+		$this->freeResult($result);
+		if (empty($type_qs)) {
 			return;
 		}
-		$in_scope = array_flip($this->filter_qs_in_scope($all_qs));
-		$out_of_scope = [];
-		foreach ($all_qs as $q) {
-			if (!isset($in_scope[$q])) {
-				$out_of_scope[] = $q;
+
+		// 2. Single SPARQL to identify which of these types are scope
+		//    descendants. Reuses filter_qs_in_scope() — same P31/P279*
+		//    semantics, but the question is "is this type ITSELF a
+		//    descendant", so we substitute the leading P31 hop with the
+		//    type itself by treating each type as the entry point and
+		//    walking P279* directly.
+		$allowed = array_flip($this->filter_type_qs_in_scope($type_qs));
+
+		if (empty($allowed)) {
+			// SPARQL gave us nothing back. Either every type was bogus
+			// (unlikely) or WDQS hiccupped (likely). Refuse to purge:
+			// a mass-delete here is exactly the failure mode this
+			// rewrite exists to prevent.
+			print "purge_out_of_scope_items: scope SPARQL returned no allowed types; aborting (no items purged)\n";
+			return;
+		}
+
+		$disallowed_types = [];
+		foreach ($type_qs as $t) {
+			if (!isset($allowed[$t])) {
+				$disallowed_types[] = $t;
 			}
 		}
-		if (empty($out_of_scope)) {
+		if (empty($disallowed_types)) {
 			return;
 		}
-		print "Purging " . count($out_of_scope) . " out-of-scope items\n";
-		$this->delete_items_by_q($out_of_scope);
+
+		// 3. Look up items carrying any disallowed type and purge them.
+		$list = implode(",", $disallowed_types);
+		$sql = "SELECT `q` FROM `item` WHERE `primary_type_q` IN ({$list})";
+		$result = $this->tfc->getSQL($this->db, $sql);
+		$to_remove = [];
+		while ($o = $result->fetch_object()) {
+			$to_remove[] = (int) $o->q;
+		}
+		$this->freeResult($result);
+
+		if (empty($to_remove)) {
+			return;
+		}
+		print "Purging " . count($to_remove) . " out-of-scope items (types: " . implode(",", $disallowed_types) . ")\n";
+		$this->delete_items_by_q($to_remove);
+	}
+
+	/**
+	 * Identify which of a list of TYPE Q-ids are themselves P279*
+	 * descendants of (or equal to) any $config->scope_root_qs root.
+	 *
+	 * Distinct from filter_qs_in_scope(): that one asks "does each
+	 * ITEM's P31 chain to a scope root?". This asks "is each TYPE
+	 * itself in the scope tree?", which is what purge wants — we
+	 * already know each item's primary_type_q, no need to re-walk P31
+	 * per item.
+	 *
+	 * Tiny VALUES set (~tens of types in production), so a single
+	 * SPARQL call suffices — no batching.
+	 *
+	 * @param list<int> $type_qs
+	 * @return list<int>
+	 */
+	protected function filter_type_qs_in_scope(array $type_qs): array
+	{
+		if (empty($type_qs) || empty($this->config->scope_root_qs)) {
+			return [];
+		}
+		$types = [];
+		foreach ($type_qs as $t) {
+			$t = (int) $t;
+			if ($t > 0) {
+				$types[$t] = true;
+			}
+		}
+		if (empty($types)) {
+			return [];
+		}
+
+		$values = "wd:Q" . implode(" wd:Q", array_keys($types));
+		$roots  = "wd:Q" . implode(" wd:Q", array_map('intval', $this->config->scope_root_qs));
+		$sparql =
+			"SELECT DISTINCT ?t WHERE {
+				VALUES ?t { {$values} }
+				VALUES ?root { {$roots} }
+				?t wdt:P279* ?root .
+			}";
+
+		$accepted = [];
+		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+			$raw = is_array($row) ? ($row["t"] ?? "") : ($row->t ?? "");
+			$q = $this->tfc->parseItemFromURL((string) $raw);
+			$num = (int) preg_replace("|\D|", "", (string) $q);
+			if ($num > 0 && isset($types[$num])) {
+				$accepted[$num] = true;
+			}
+		}
+		return array_keys($accepted);
 	}
 
 	public function import_commons_video_minutes(): void

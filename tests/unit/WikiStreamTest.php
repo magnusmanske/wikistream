@@ -3285,35 +3285,55 @@ final class WikiStreamTest extends TestCase
     {
         [$ws, $tfc] = $this->makeWikiStream();
 
-        // First getSQL returns the full `item` list. All later getSQL
-        // calls are the DELETE chain inside delete_items_by_q().
-        $itemRow = function (int $q): \stdClass {
-            $o = new \stdClass();
-            $o->q = $q;
-            return $o;
-        };
+        // Three primary_type_q values in the DB:
+        //   Q11424  (film)             — scope root, allowed
+        //   Q24862  (short film)       — P279 of film, allowed
+        //   Q515    (city)             — out of scope
+        //
+        // Items:
+        //   Q1001 → Q11424  (kept)
+        //   Q1002 → Q24862  (kept)
+        //   Q84   → Q515    (purged)
+        //   Q144  → Q515    (purged)
+        $typeRow = fn(int $q) => (object) ['primary_type_q' => $q];
+        $itemRow = fn(int $q) => (object) ['q' => $q];
+
         $sqlCalls = [];
         $sqlIndex = 0;
         $tfc->method('getSQL')->willReturnCallback(
-            function ($db, string $sql) use (&$sqlCalls, &$sqlIndex, $itemRow) {
+            function ($db, string $sql) use (&$sqlCalls, &$sqlIndex, $typeRow, $itemRow) {
                 $sqlCalls[] = $sql;
-                if ($sqlIndex++ === 0) {
-                    // Initial SELECT q FROM item.
-                    return $this->makeResult([$itemRow(84), $itemRow(144), $itemRow(1001)]);
+                $i = $sqlIndex++;
+                if ($i === 0) {
+                    // SELECT DISTINCT primary_type_q
+                    return $this->makeResult([$typeRow(11424), $typeRow(24862), $typeRow(515)]);
+                }
+                if ($i === 1) {
+                    // SELECT q FROM item WHERE primary_type_q IN (...)
+                    return $this->makeResult([$itemRow(84), $itemRow(144)]);
                 }
                 return $this->emptyResult();
             },
         );
-        $tfc->method('getSPARQL_TSV')->willReturn(
-            [['q' => 'http://www.wikidata.org/entity/Q1001']],
-        );
+        // SPARQL classifies the types: Q11424 and Q24862 are in scope; Q515 isn't.
+        $tfc->method('getSPARQL_TSV')->willReturn([
+            ['t' => 'http://www.wikidata.org/entity/Q11424'],
+            ['t' => 'http://www.wikidata.org/entity/Q24862'],
+        ]);
         $tfc->method('parseItemFromURL')->willReturnCallback(
             fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
         );
 
         $ws->purge_out_of_scope_items();
 
-        // Inspect the DELETE statements emitted.
+        // The second SELECT must scope to the disallowed type only (Q515),
+        // never to Q11424 or Q24862.
+        $selectItems = $sqlCalls[1] ?? '';
+        $this->assertStringContainsString('IN (515)', $selectItems);
+        $this->assertStringNotContainsString('11424', $selectItems);
+        $this->assertStringNotContainsString('24862', $selectItems);
+
+        // DELETE chain must target Q84 and Q144, never Q1001 or Q1002.
         $deletes = array_values(array_filter(
             $sqlCalls,
             fn(string $s) => str_starts_with($s, 'DELETE FROM `item`')
@@ -3321,17 +3341,51 @@ final class WikiStreamTest extends TestCase
                 || str_starts_with($s, 'DELETE FROM `file`')
                 || str_starts_with($s, 'DELETE FROM `group_item`')
         ));
-        $this->assertNotEmpty($deletes, 'A DELETE chain must be emitted for the out-of-scope items.');
+        $this->assertNotEmpty($deletes, 'DELETE chain must be emitted for the out-of-scope items.');
         $joined = implode("\n", $deletes);
-
-        // Each DELETE must target Q84 and Q144 — never Q1001.
         $this->assertMatchesRegularExpression('/IN \(84,144\)/', $joined);
         $this->assertStringNotContainsString('1001', $joined);
+        $this->assertStringNotContainsString('1002', $joined);
 
         // All four child/parent tables must be hit (idempotent cascade).
-        $tables = ['`section`', '`file`', '`group_item`', '`item`'];
-        foreach ($tables as $t) {
+        foreach (['`section`', '`file`', '`group_item`', '`item`'] as $t) {
             $this->assertStringContainsString("DELETE FROM {$t}", $joined);
         }
+    }
+
+    public function test_purge_out_of_scope_items_aborts_when_sparql_returns_empty(): void
+    {
+        // Regression: an earlier implementation batched 500 Qs per SPARQL
+        // call. A single batch timing out at WDQS → empty result → 500
+        // legit items marked out-of-scope and purged. The defensive abort
+        // here ensures that if SPARQL produces NO accepted types at all,
+        // we refuse to purge anything (it's almost certainly a WDQS
+        // hiccup, not an indictment of every type in the DB).
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $sqlCalls = [];
+        $sqlIndex = 0;
+        $tfc->method('getSQL')->willReturnCallback(
+            function ($db, string $sql) use (&$sqlCalls, &$sqlIndex) {
+                $sqlCalls[] = $sql;
+                if ($sqlIndex++ === 0) {
+                    // Distinct primary_type_q — pretend the DB is healthy.
+                    return $this->makeResult([
+                        (object) ['primary_type_q' => 11424],
+                        (object) ['primary_type_q' => 24862],
+                    ]);
+                }
+                return $this->emptyResult();
+            },
+        );
+        // WDQS returns nothing — simulate a timeout / partial response.
+        $tfc->method('getSPARQL_TSV')->willReturn([]);
+
+        $ws->purge_out_of_scope_items();
+
+        // Only the initial DISTINCT SELECT should have fired. No item
+        // lookup, no DELETE chain — purge_out_of_scope_items aborted.
+        $this->assertCount(1, $sqlCalls, 'No follow-up SQL allowed after empty SPARQL result.');
+        $this->assertStringContainsString('DISTINCT `primary_type_q`', $sqlCalls[0]);
     }
 }

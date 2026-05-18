@@ -7,3 +7,4 @@ public_html/config.js
 public_html/config.json
 .claude
 audits/
+/*.json
