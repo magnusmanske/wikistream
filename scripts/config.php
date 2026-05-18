@@ -36,6 +36,19 @@
 	# multiple instance-of claims.
 	public $episode_type_qs = [];
 
+	# Root Q-numbers that define the tool's scope: an item is only
+	# admissible as a "primary" entry when at least one of its P31
+	# values walks the P279* tree up to one of these roots. Enforced at
+	# every item-insertion path and by purge_out_of_scope_items().
+	#
+	# WikiFlix: creative screen works only (film, TV episode, …).
+	# WikiVibes: creative audio works only (music). People, places,
+	# topics etc. are explicitly out of scope and must never be ingested
+	# as primary items, even when they carry a video/audio statement.
+	#
+	# Empty = no scope check (only the SPARQL discovery filters apply).
+	public $scope_root_qs = [];
+
 	/// Returns an instance of the appropriate config class, as per the config.js file in the tool root directory
 	function get_config_instance(): self
 	{
@@ -76,6 +89,10 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig
 	public $whitelist_page = ""; # 'Help:WikiFlix/Movie whitelist';
 	public $blacklist_page = "Help:WikiFlix/Movie blacklist";
 	public $bad_genres = [185529, 4373044, 3461143, 599558]; # P136
+	public $scope_root_qs = [
+		11424,    # film
+		21191270, # television series episode
+	];
 	public $sparql = [
 		"SELECT DISTINCT ?q {
 			?q (wdt:P31/(wdt:P279*)) wd:Q11424 ; wdt:P6216/(wdt:P279*) wd:Q19652 .
@@ -258,6 +275,9 @@ class WikiStreamConfigWikiVibes extends WikiStreamConfig
 	public $whitelist_page = ""; # 'Help:WikiVibes/audio whitelist';
 	public $blacklist_page = "";
 	public $bad_genres = []; # P136
+	public $scope_root_qs = [
+		2188189, # musical work
+	];
 	public $sparql = [
 		"SELECT ?q ?file { ?q wdt:P51 ?file ; wdt:P31/wdt:P279* wd:Q2188189 }",
 	];

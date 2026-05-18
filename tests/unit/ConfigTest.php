@@ -395,4 +395,40 @@ final class ConfigTest extends TestCase
         $this->assertArrayHasKey('episode_type_qs', $config->interface_config);
         $this->assertContains(21191270, $config->interface_config['episode_type_qs']);
     }
+
+    // ------------------------------------------------------------------
+    // scope_root_qs — items must walk P31/P279* up to one of these
+    // roots, or they're rejected at ingestion. Out-of-scope examples:
+    //   Q84  (London, a city)
+    //   Q144 (dog, a species)
+    // These items can carry a P10 video statement (e.g. a documentary)
+    // but must not be ingested as primary entries.
+    // ------------------------------------------------------------------
+
+    public function test_wikiflix_scope_root_qs_covers_film_and_episode(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $this->assertIsArray($config->scope_root_qs);
+        $this->assertContainsOnly('int', $config->scope_root_qs);
+        $this->assertContains(11424,    $config->scope_root_qs, 'film (Q11424) must be a scope root.');
+        $this->assertContains(21191270, $config->scope_root_qs, 'TV episode (Q21191270) must be a scope root.');
+    }
+
+    public function test_wikivibes_scope_root_qs_is_music_only(): void
+    {
+        $config = new \WikiStreamConfigWikiVibes();
+        $this->assertIsArray($config->scope_root_qs);
+        $this->assertContainsOnly('int', $config->scope_root_qs);
+        $this->assertContains(2188189, $config->scope_root_qs, 'musical work (Q2188189) must be a scope root.');
+        // No film classes leaking into the audio tool.
+        $this->assertNotContains(11424, $config->scope_root_qs);
+    }
+
+    public function test_base_config_defaults_scope_root_qs_to_empty(): void
+    {
+        // Subclasses override; the base class must not silently authorise
+        // any items.
+        $base = new \WikiStreamConfig();
+        $this->assertSame([], $base->scope_root_qs);
+    }
 }

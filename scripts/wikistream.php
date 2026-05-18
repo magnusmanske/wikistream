@@ -620,6 +620,144 @@ class WikiStream
 		return $ret;
 	}
 
+	/**
+	 * Maximum number of Q-numbers per SPARQL VALUES batch used by
+	 * filter_qs_in_scope(). 500 keeps each query well under the WDQS
+	 * URL/length limits and bounds memory for the response.
+	 */
+	public const SCOPE_FILTER_BATCH = 500;
+
+	/**
+	 * Filter a list of numeric Q-ids down to those that satisfy the
+	 * tool's scope: an item is in scope when at least one of its P31
+	 * values walks the P279* tree up to one of $config->scope_root_qs.
+	 *
+	 * WikiFlix is "creative screen works"; WikiVibes is "creative audio".
+	 * This is the single chokepoint that keeps items like Q84 (London)
+	 * or Q144 (dog) from sneaking in just because they carry a video or
+	 * audio statement.
+	 *
+	 * When $config->scope_root_qs is empty, the check is a no-op and the
+	 * input is returned unchanged.
+	 *
+	 * Order of the returned list is not preserved.
+	 *
+	 * @param list<int> $q_numerics
+	 * @return list<int>
+	 */
+	public function filter_qs_in_scope(array $q_numerics): array
+	{
+		if (empty($q_numerics)) {
+			return [];
+		}
+		if (empty($this->config->scope_root_qs)) {
+			return array_values(array_unique(array_map('intval', $q_numerics)));
+		}
+
+		// Normalise + dedupe; drop non-positive ids upfront.
+		$qs = [];
+		foreach ($q_numerics as $q) {
+			$q = (int) $q;
+			if ($q > 0) {
+				$qs[$q] = true;
+			}
+		}
+		if (empty($qs)) {
+			return [];
+		}
+
+		$roots = "wd:Q" . implode(" wd:Q", array_map('intval', $this->config->scope_root_qs));
+		$accepted = [];
+		foreach (array_chunk(array_keys($qs), self::SCOPE_FILTER_BATCH) as $chunk) {
+			$values = "wd:Q" . implode(" wd:Q", $chunk);
+			$sparql =
+				"SELECT DISTINCT ?q WHERE {
+					VALUES ?q { {$values} }
+					VALUES ?root { {$roots} }
+					?q wdt:P31/wdt:P279* ?root .
+				}";
+			foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+				$q = $this->tfc->parseItemFromURL((string) (is_array($row) ? ($row["q"] ?? "") : ($row->q ?? "")));
+				$num = (int) preg_replace("|\D|", "", (string) $q);
+				if ($num > 0 && isset($qs[$num])) {
+					$accepted[$num] = true;
+				}
+			}
+		}
+		return array_keys($accepted);
+	}
+
+	/**
+	 * Remove the given items from `item` and all FK-dependent rows
+	 * (`section`, `file`, `group_item`). Wrapped in one transaction so a
+	 * mid-flight failure can't leave orphans. No-op on empty input.
+	 *
+	 * @param list<int> $q_numerics
+	 */
+	protected function delete_items_by_q(array $q_numerics): void
+	{
+		$qs = [];
+		foreach ($q_numerics as $q) {
+			$q = (int) $q;
+			if ($q > 0) {
+				$qs[$q] = true;
+			}
+		}
+		if (empty($qs)) {
+			return;
+		}
+		$this->beginTransaction();
+		try {
+			foreach (array_chunk(array_keys($qs), 1000) as $chunk) {
+				$list = implode(",", $chunk);
+				$sql = "DELETE FROM `section` WHERE `item_q` IN ({$list})";
+				$this->tfc->getSQL($this->db, $sql);
+				$sql = "DELETE FROM `file` WHERE `item_q` IN ({$list})";
+				$this->tfc->getSQL($this->db, $sql);
+				$sql = "DELETE FROM `group_item` WHERE `item_q` IN ({$list})";
+				$this->tfc->getSQL($this->db, $sql);
+				$sql = "DELETE FROM `item` WHERE `q` IN ({$list})";
+				$this->tfc->getSQL($this->db, $sql);
+			}
+			$this->commit();
+		} catch (\Throwable $e) {
+			$this->rollback();
+			throw $e;
+		}
+	}
+
+	/**
+	 * Scan every row in `item` and delete those that no longer satisfy
+	 * the tool's scope (see filter_qs_in_scope()). Counterpart to the
+	 * insertion-time filter: catches items added before the filter
+	 * existed, or whose P31 was retargeted on Wikidata after ingestion.
+	 *
+	 * Cascades through `section`, `file`, and `group_item` via
+	 * delete_items_by_q().
+	 */
+	public function purge_out_of_scope_items(): void
+	{
+		if (empty($this->config->scope_root_qs)) {
+			return;
+		}
+		$all_qs = array_values(array_map('intval', $this->get_items_in_db()));
+		if (empty($all_qs)) {
+			return;
+		}
+		$in_scope = array_flip($this->filter_qs_in_scope($all_qs));
+		$out_of_scope = [];
+		foreach ($all_qs as $q) {
+			if (!isset($in_scope[$q])) {
+				$out_of_scope[] = $q;
+			}
+		}
+		if (empty($out_of_scope)) {
+			return;
+		}
+		print "Purging " . count($out_of_scope) . " out-of-scope items\n";
+		$this->delete_items_by_q($out_of_scope);
+	}
+
 	public function import_commons_video_minutes(): void
 	{
 		$sql = "SELECT `id`, `key` FROM `file` WHERE `property`=10 AND `minutes` IS NULL";
@@ -759,6 +897,14 @@ class WikiStream
 			return;
 		} # Nothing new on the western front
 		$new_qs = array_values(array_unique($new_qs));
+		// Defence-in-depth scope check. The discovery SPARQLs already
+		// constrain to films/episodes/etc., but cross-check before
+		// touching the DB so a stray SPARQL query or a future addition
+		// can't silently leak out-of-scope items.
+		$new_qs = $this->filter_qs_in_scope($new_qs);
+		if (count($new_qs) == 0) {
+			return;
+		}
 		print "Adding " . count($new_qs) . " new items\n";
 		foreach (array_chunk($new_qs, 500) as $chunk) {
 			$sql =
@@ -2170,6 +2316,13 @@ class WikiStream
 		// so building a hashmap of every `item` row to filter them is
 		// gratuitous. INSERT IGNORE silently no-ops on existing rows.
 		$qs = array_values(array_unique($qs));
+		// The whitelist page is editable by anyone on Wikidata, so a
+		// scope check is essential here — without it, a stray Q would
+		// be inserted unconditionally.
+		$qs = $this->filter_qs_in_scope($qs);
+		if (count($qs) == 0) {
+			return;
+		}
 		$sql =
 			"INSERT IGNORE INTO `item` (`q`) VALUES (" .
 			implode("),(", $qs) .
@@ -2389,6 +2542,13 @@ class WikiStream
 			}
 		}
 
+		if (count($accepted) === 0) {
+			return;
+		}
+
+		// Same defence-in-depth scope check as update_from_sparql() — the
+		// candidate SPARQL already constrains to films but we re-verify.
+		$accepted = $this->filter_qs_in_scope($accepted);
 		if (count($accepted) === 0) {
 			return;
 		}

@@ -25,6 +25,7 @@ match ($cmd) {
 	'groups'                    => $ws->import_missing_groups(),
 	'backfill_group_items'      => $ws->backfill_group_items(),
 	'purge_items_without_files' => $ws->purge_items_without_files(),
+	'purge_out_of_scope_items'  => $ws->purge_out_of_scope_items(),
 	'annotate_ia_movies'        => $ws->annotate_ia_movies(),
 	'annotate_pre_1900_public_domain' => $ws->annotate_pre_1900_public_domain(),
 	'import_ia_curated_imdb_p724' => $ws->import_ia_curated_imdb_p724(),
@@ -41,6 +42,7 @@ match ($cmd) {
 		$ws->make_rc_unavailable();
 		$ws->add_missing_item_details();
 		$ws->clear_bad_genres();
+		$ws->purge_out_of_scope_items();
 		$ws->purge_items_without_files();
 		$ws->remove_unused_people();
 		$ws->update_persons();

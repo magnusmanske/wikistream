@@ -3091,4 +3091,247 @@ final class WikiStreamTest extends TestCase
         $this->assertStringContainsString('wd:Q11424',    $joined, 'main SPARQL must still run');
         $this->assertStringNotContainsString('wd:Q21191270', $joined, 'episode SPARQL must be skipped');
     }
+
+    // ------------------------------------------------------------------
+    // filter_qs_in_scope() — scope guard that keeps WikiFlix to films/
+    // episodes and WikiVibes to music. Used at every item-insertion
+    // path and by purge_out_of_scope_items().
+    // ------------------------------------------------------------------
+
+    public function test_filter_qs_in_scope_empty_input_returns_empty_without_sparql(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->expects($this->never())->method('getSPARQL_TSV');
+
+        $this->assertSame([], $ws->filter_qs_in_scope([]));
+    }
+
+    public function test_filter_qs_in_scope_no_roots_passes_through_unchanged(): void
+    {
+        // A config that disables the scope check (empty scope_root_qs)
+        // must short-circuit before issuing any SPARQL.
+        $config = new \WikiStreamConfigWikiFlix();
+        $config->scope_root_qs = [];
+
+        [$ws, $tfc] = $this->makeWikiStream($config);
+        $tfc->expects($this->never())->method('getSPARQL_TSV');
+
+        $out = $ws->filter_qs_in_scope([84, 144, 11424]);
+        sort($out);
+        $this->assertSame([84, 144, 11424], $out);
+    }
+
+    public function test_filter_qs_in_scope_drops_qs_missing_from_sparql_result(): void
+    {
+        // Q1001 is in scope (returned by SPARQL); Q84 and Q144 are not
+        // (omitted from the result).
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = [];
+        $tfc->method('getSPARQL_TSV')->willReturnCallback(
+            function (string $sparql) use (&$captured) {
+                $captured[] = $sparql;
+                return [['q' => 'http://www.wikidata.org/entity/Q1001']];
+            },
+        );
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+
+        $out = $ws->filter_qs_in_scope([84, 144, 1001]);
+
+        $this->assertSame([1001], $out);
+        $this->assertCount(1, $captured);
+        // The query must constrain via P31/P279* and list the configured roots.
+        $this->assertStringContainsString('wdt:P31/wdt:P279*', $captured[0]);
+        $this->assertStringContainsString('wd:Q11424', $captured[0]);    // film
+        $this->assertStringContainsString('wd:Q21191270', $captured[0]); // TV episode
+        // All candidate Qs must appear in the VALUES clause.
+        $this->assertStringContainsString('wd:Q84', $captured[0]);
+        $this->assertStringContainsString('wd:Q144', $captured[0]);
+        $this->assertStringContainsString('wd:Q1001', $captured[0]);
+    }
+
+    public function test_filter_qs_in_scope_chunks_large_inputs(): void
+    {
+        // SCOPE_FILTER_BATCH is 500 → a 1200-Q input must be split into
+        // three SPARQL calls. Each call must accept Qs equal to its input
+        // unchanged (everything in scope).
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $callCount = 0;
+        $allReturned = [];
+        $tfc->method('getSPARQL_TSV')->willReturnCallback(
+            function (string $sparql) use (&$callCount, &$allReturned) {
+                $callCount++;
+                // Echo whatever Qs appear in VALUES back to the caller.
+                preg_match_all('~wd:Q(\d+)~', $sparql, $m);
+                $rows = [];
+                foreach ($m[1] as $q) {
+                    // Skip the two scope roots — they show up in the
+                    // second VALUES clause but aren't candidate items.
+                    if ((int) $q === 11424 || (int) $q === 21191270) {
+                        continue;
+                    }
+                    $rows[] = ['q' => "http://www.wikidata.org/entity/Q{$q}"];
+                    $allReturned[] = (int) $q;
+                }
+                return $rows;
+            },
+        );
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+
+        $input = range(1, 1200);
+        $out = $ws->filter_qs_in_scope($input);
+
+        $this->assertSame(3, $callCount, '1200 Qs must split into three SCOPE_FILTER_BATCH=500 batches.');
+        $this->assertCount(1200, $out);
+    }
+
+    public function test_filter_qs_in_scope_dedupes_and_drops_nonpositive(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = '';
+        $tfc->method('getSPARQL_TSV')->willReturnCallback(
+            function (string $sparql) use (&$captured) {
+                $captured = $sparql;
+                return []; // not relevant to this test
+            },
+        );
+        $tfc->method('parseItemFromURL')->willReturn('');
+
+        $ws->filter_qs_in_scope([42, 42, 0, -7, 42, 99]);
+
+        // 0 and -7 must never appear in the VALUES clause; 42 only once.
+        $this->assertStringNotContainsString('wd:Q0', $captured);
+        $this->assertStringNotContainsString('wd:Q-7', $captured);
+        $this->assertSame(1, substr_count($captured, 'wd:Q42 '));
+    }
+
+    // ------------------------------------------------------------------
+    // update_from_sparql() must filter discovered Qs through the scope
+    // check before INSERTing — defence-in-depth against a future SPARQL
+    // tweak that fails to constrain P31.
+    // ------------------------------------------------------------------
+
+    public function test_update_from_sparql_drops_out_of_scope_before_insert(): void
+    {
+        $config = new class extends \WikiStreamConfigWikiFlix {
+            public $sparql = ['SELECT ?q { ?q wdt:P31 wd:Q11424 }'];
+            public $episode_sparql = [];
+            public $bad_genres = [];
+            public $include_episodes = false;
+        };
+
+        $sqlCaptured = [];
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($this->makeFakeDb());
+        // Two SPARQL calls expected: discovery, then the scope check.
+        $sparqlCalls = 0;
+        $tfc->method('getSPARQL_TSV')->willReturnCallback(function (string $sparql) use (&$sparqlCalls) {
+            $sparqlCalls++;
+            if ($sparqlCalls === 1) {
+                // Discovery returns three candidates.
+                return [
+                    ['q' => 'http://www.wikidata.org/entity/Q84'],   // London — out of scope
+                    ['q' => 'http://www.wikidata.org/entity/Q144'],  // dog — out of scope
+                    ['q' => 'http://www.wikidata.org/entity/Q1001'], // some film — in scope
+                ];
+            }
+            // Scope check — only Q1001 walks P31/P279* to a scope root.
+            return [['q' => 'http://www.wikidata.org/entity/Q1001']];
+        });
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+        $tfc->method('getSQL')->willReturnCallback(function ($db, string $sql) use (&$sqlCaptured) {
+            $sqlCaptured[] = $sql;
+            return $this->emptyResult();
+        });
+
+        $ws = new \WikiStream($config, $tfc);
+        $ws->update_from_sparql();
+
+        // Find the INSERT statement (if any) — only Q1001 may appear.
+        $inserts = array_values(array_filter(
+            $sqlCaptured,
+            fn(string $s) => str_starts_with($s, 'INSERT IGNORE INTO `item`')
+        ));
+        $this->assertCount(1, $inserts, 'Exactly one item insert must be emitted.');
+        $this->assertStringContainsString('(1001)', $inserts[0]);
+        $this->assertStringNotContainsString('(84)', $inserts[0]);
+        $this->assertStringNotContainsString('(144)', $inserts[0]);
+    }
+
+    // ------------------------------------------------------------------
+    // purge_out_of_scope_items() — full DB sweep that removes items no
+    // longer passing the scope check.
+    // ------------------------------------------------------------------
+
+    public function test_purge_out_of_scope_items_noop_when_scope_disabled(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $config->scope_root_qs = [];
+
+        [$ws, $tfc] = $this->makeWikiStream($config);
+        $tfc->expects($this->never())->method('getSQL');
+        $tfc->expects($this->never())->method('getSPARQL_TSV');
+
+        $ws->purge_out_of_scope_items();
+    }
+
+    public function test_purge_out_of_scope_items_deletes_only_out_of_scope_rows(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        // First getSQL returns the full `item` list. All later getSQL
+        // calls are the DELETE chain inside delete_items_by_q().
+        $itemRow = function (int $q): \stdClass {
+            $o = new \stdClass();
+            $o->q = $q;
+            return $o;
+        };
+        $sqlCalls = [];
+        $sqlIndex = 0;
+        $tfc->method('getSQL')->willReturnCallback(
+            function ($db, string $sql) use (&$sqlCalls, &$sqlIndex, $itemRow) {
+                $sqlCalls[] = $sql;
+                if ($sqlIndex++ === 0) {
+                    // Initial SELECT q FROM item.
+                    return $this->makeResult([$itemRow(84), $itemRow(144), $itemRow(1001)]);
+                }
+                return $this->emptyResult();
+            },
+        );
+        $tfc->method('getSPARQL_TSV')->willReturn(
+            [['q' => 'http://www.wikidata.org/entity/Q1001']],
+        );
+        $tfc->method('parseItemFromURL')->willReturnCallback(
+            fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
+        );
+
+        $ws->purge_out_of_scope_items();
+
+        // Inspect the DELETE statements emitted.
+        $deletes = array_values(array_filter(
+            $sqlCalls,
+            fn(string $s) => str_starts_with($s, 'DELETE FROM `item`')
+                || str_starts_with($s, 'DELETE FROM `section`')
+                || str_starts_with($s, 'DELETE FROM `file`')
+                || str_starts_with($s, 'DELETE FROM `group_item`')
+        ));
+        $this->assertNotEmpty($deletes, 'A DELETE chain must be emitted for the out-of-scope items.');
+        $joined = implode("\n", $deletes);
+
+        // Each DELETE must target Q84 and Q144 — never Q1001.
+        $this->assertMatchesRegularExpression('/IN \(84,144\)/', $joined);
+        $this->assertStringNotContainsString('1001', $joined);
+
+        // All four child/parent tables must be hit (idempotent cascade).
+        $tables = ['`section`', '`file`', '`group_item`', '`item`'];
+        foreach ($tables as $t) {
+            $this->assertStringContainsString("DELETE FROM {$t}", $joined);
+        }
+    }
 }
