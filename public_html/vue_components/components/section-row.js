@@ -19,7 +19,17 @@ import { ttMixin } from '../../resources/vue_es6/state.js';
 export default {
     name: 'SectionRow',
     mixins: [ttMixin],
-    props: ['section', 'nolink', 'multi_row', 'entries', 'link_prefix', 'removable'],
+    // `removable` is typed as Boolean so Vue 2 coerces the shorthand
+    // attribute (<section-row removable>) to true. Without the type
+    // declaration it would arrive as an empty string — falsy in v-if.
+    props: {
+        section:     null,
+        nolink:      null,
+        multi_row:   null,
+        entries:     null,
+        link_prefix: null,
+        removable:   { type: Boolean, default: false },
+    },
     emits: ['purge', 'remove'],
     computed: {
         link_target() {

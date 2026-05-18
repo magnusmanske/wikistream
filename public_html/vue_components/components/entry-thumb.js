@@ -18,7 +18,13 @@ const { computed } = Vue;
 export default {
     name: 'EntryThumb',
     mixins: [ttMixin],
-    props: ['entry', 'removable'],
+    // `removable` is typed as Boolean so Vue 2 coerces the shorthand
+    // attribute (<entry-thumb removable>) to true. Without the type
+    // declaration it would arrive as an empty string — falsy in v-if.
+    props: {
+        entry: null,
+        removable: { type: Boolean, default: false },
+    },
     emits: ['remove'],
     setup(props) {
         const { isFavorite, toggleFavorite } = useFavorites();
