@@ -3210,12 +3210,16 @@ final class WikiStreamTest extends TestCase
     }
 
     // ------------------------------------------------------------------
-    // update_from_sparql() must filter discovered Qs through the scope
-    // check before INSERTing — defence-in-depth against a future SPARQL
-    // tweak that fails to constrain P31.
+    // update_from_sparql() inserts everything the discovery SPARQL
+    // returned — no ingestion-time scope filter. The discovery queries
+    // already carry wdt:P31/wdt:P279* constraints, and anything that
+    // sneaks through gets caught by purge_out_of_scope_items() after
+    // primary_type_q is set. The earlier ingestion-time SPARQL filter
+    // was removed because it shared the 500-Q-VALUES timeout failure
+    // mode that the original purge hit.
     // ------------------------------------------------------------------
 
-    public function test_update_from_sparql_drops_out_of_scope_before_insert(): void
+    public function test_update_from_sparql_inserts_all_discovered_qs_unfiltered(): void
     {
         $config = new class extends \WikiStreamConfigWikiFlix {
             public $sparql = ['SELECT ?q { ?q wdt:P31 wd:Q11424 }'];
@@ -3227,20 +3231,14 @@ final class WikiStreamTest extends TestCase
         $sqlCaptured = [];
         $tfc = $this->createMock(\ToolforgeCommon::class);
         $tfc->method('openDBtool')->willReturn($this->makeFakeDb());
-        // Two SPARQL calls expected: discovery, then the scope check.
+        // Exactly one SPARQL call now — discovery only, no follow-up filter.
         $sparqlCalls = 0;
         $tfc->method('getSPARQL_TSV')->willReturnCallback(function (string $sparql) use (&$sparqlCalls) {
             $sparqlCalls++;
-            if ($sparqlCalls === 1) {
-                // Discovery returns three candidates.
-                return [
-                    ['q' => 'http://www.wikidata.org/entity/Q84'],   // London — out of scope
-                    ['q' => 'http://www.wikidata.org/entity/Q144'],  // dog — out of scope
-                    ['q' => 'http://www.wikidata.org/entity/Q1001'], // some film — in scope
-                ];
-            }
-            // Scope check — only Q1001 walks P31/P279* to a scope root.
-            return [['q' => 'http://www.wikidata.org/entity/Q1001']];
+            return [
+                ['q' => 'http://www.wikidata.org/entity/Q1001'],
+                ['q' => 'http://www.wikidata.org/entity/Q1002'],
+            ];
         });
         $tfc->method('parseItemFromURL')->willReturnCallback(
             fn(string $url) => preg_match('~Q\d+$~', $url, $m) ? $m[0] : ''
@@ -3253,15 +3251,13 @@ final class WikiStreamTest extends TestCase
         $ws = new \WikiStream($config, $tfc);
         $ws->update_from_sparql();
 
-        // Find the INSERT statement (if any) — only Q1001 may appear.
+        $this->assertSame(1, $sparqlCalls, 'Exactly one SPARQL call: discovery, no scope-recheck.');
         $inserts = array_values(array_filter(
             $sqlCaptured,
             fn(string $s) => str_starts_with($s, 'INSERT IGNORE INTO `item`')
         ));
-        $this->assertCount(1, $inserts, 'Exactly one item insert must be emitted.');
-        $this->assertStringContainsString('(1001)', $inserts[0]);
-        $this->assertStringNotContainsString('(84)', $inserts[0]);
-        $this->assertStringNotContainsString('(144)', $inserts[0]);
+        $this->assertCount(1, $inserts);
+        $this->assertStringContainsString('(1001),(1002)', $inserts[0]);
     }
 
     // ------------------------------------------------------------------

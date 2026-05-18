@@ -1006,14 +1006,13 @@ class WikiStream
 			return;
 		} # Nothing new on the western front
 		$new_qs = array_values(array_unique($new_qs));
-		// Defence-in-depth scope check. The discovery SPARQLs already
-		// constrain to films/episodes/etc., but cross-check before
-		// touching the DB so a stray SPARQL query or a future addition
-		// can't silently leak out-of-scope items.
-		$new_qs = $this->filter_qs_in_scope($new_qs);
-		if (count($new_qs) == 0) {
-			return;
-		}
+		// No ingestion-side scope filter here: the discovery SPARQLs in
+		// $config->sparql / $config->episode_sparql are authoritative
+		// (they all carry wdt:P31/wdt:P279* constraints). Anything that
+		// slips through gets caught after primary_type_q is derived,
+		// by purge_out_of_scope_items() — which classifies the small
+		// distinct-types set in one SPARQL call, not 500-Q batches that
+		// silently drop items on WDQS timeouts.
 		print "Adding " . count($new_qs) . " new items\n";
 		foreach (array_chunk($new_qs, 500) as $chunk) {
 			$sql =
@@ -2424,14 +2423,10 @@ class WikiStream
 		// Skip the prefetch: the whitelist page lists at most dozens of Qs,
 		// so building a hashmap of every `item` row to filter them is
 		// gratuitous. INSERT IGNORE silently no-ops on existing rows.
+		// Scope check is enforced after data fetch by
+		// purge_out_of_scope_items() — a Q on the whitelist page that
+		// isn't a film/episode still gets dropped on the next purge.
 		$qs = array_values(array_unique($qs));
-		// The whitelist page is editable by anyone on Wikidata, so a
-		// scope check is essential here — without it, a stray Q would
-		// be inserted unconditionally.
-		$qs = $this->filter_qs_in_scope($qs);
-		if (count($qs) == 0) {
-			return;
-		}
 		$sql =
 			"INSERT IGNORE INTO `item` (`q`) VALUES (" .
 			implode("),(", $qs) .
@@ -2655,15 +2650,11 @@ class WikiStream
 			return;
 		}
 
-		// Same defence-in-depth scope check as update_from_sparql() — the
-		// candidate SPARQL already constrains to films but we re-verify.
-		$accepted = $this->filter_qs_in_scope($accepted);
-		if (count($accepted) === 0) {
-			return;
-		}
-
 		// Insert in chunks. INSERT IGNORE handles races against the
 		// normal SPARQL pipeline writing the same q in parallel.
+		// The candidate SPARQL above already constrains via P31/P279*
+		// to Q11424, and purge_out_of_scope_items() catches anything
+		// that slips through — no second scope filter here.
 		foreach (array_chunk($accepted, 500) as $chunk) {
 			$sql =
 				"INSERT IGNORE INTO `item` (`q`) VALUES (" .
