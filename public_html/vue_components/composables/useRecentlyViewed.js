@@ -56,6 +56,13 @@ export function clearViews() {
     writeStorage(items.value);
 }
 
+export function removeView(q) {
+    const num = parseInt(q, 10);
+    if (!Number.isFinite(num)) return;
+    items.value = items.value.filter((e) => parseInt(e.q, 10) !== num);
+    writeStorage(items.value);
+}
+
 export function useRecentlyViewed() {
-    return { items, recordView, clearViews };
+    return { items, recordView, clearViews, removeView };
 }

@@ -106,6 +106,57 @@ div.page-header:hover .page-header-movies-total {
     font-size: 0.95rem;
     pointer-events: none;
 }
+.entry-thumb-remove {
+    position: absolute;
+    top: 0.5rem;
+    left: 0.5rem;
+    z-index: 3;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .2s, background .2s;
+}
+/* If the episode badge is present, stack the remove button below it
+   (badge stays in its top-left slot, remove moves down one row). */
+.entry-thumb-remove.has-episode-badge {
+    top: 3rem;
+}
+.entry-container .thumbnail-container:hover .entry-thumb-remove,
+.entry-container .thumbnail-container:focus-within .entry-thumb-remove {
+    opacity: 1;
+}
+.entry-thumb-remove:hover {
+    background: rgba(170, 30, 30, 0.9);
+}
+/* Touch devices have no hover — keep remove visible there so users
+   can actually tap it. Same approach Bootstrap takes for hover-only UI. */
+@media (hover: none) {
+    .entry-thumb-remove { opacity: 1; }
+}
+.section-purge {
+    margin-left: 0.5rem;
+    padding: 0 0.4rem;
+    border: none;
+    background: transparent;
+    color: #AAA;
+    cursor: pointer;
+    font-size: 0.85em;
+    vertical-align: middle;
+    transition: color .2s;
+}
+.section-purge:hover,
+.section-purge:focus-visible {
+    color: #ff6464;
+}
 .entry-container .thumbnail-container a {
     overflow: hidden;
     width: 200px;

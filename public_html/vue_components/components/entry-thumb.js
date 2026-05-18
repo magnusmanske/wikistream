@@ -18,7 +18,8 @@ const { computed } = Vue;
 export default {
     name: 'EntryThumb',
     mixins: [ttMixin],
-    props: ['entry'],
+    props: ['entry', 'removable'],
+    emits: ['remove'],
     setup(props) {
         const { isFavorite, toggleFavorite } = useFavorites();
         const { start: prefetchStart, cancel: prefetchCancel } = useHoverPrefetch();
@@ -61,6 +62,9 @@ export default {
             });
             return ret;
         },
+        onRemoveClick() {
+            if (this.entry && this.entry.q) this.$emit('remove', this.entry.q);
+        },
     },
     template: `
         <div class="entry-container" @mouseenter="onHoverStart" @mouseleave="prefetchCancel">
@@ -90,6 +94,17 @@ export default {
                 >
                     <i class="bi bi-tv-fill"></i>
                 </span>
+                <button
+                    v-if="removable"
+                    type="button"
+                    class="entry-thumb-remove"
+                    :class="{ 'has-episode-badge': is_episode }"
+                    @click.stop.prevent="onRemoveClick"
+                    tt_title="remove_from_recently_viewed"
+                    aria-label="Remove from recently viewed"
+                >
+                    <i class="bi bi-x-lg"></i>
+                </button>
                 <div class="legend">
                     {{entry.title}}
                     <div>

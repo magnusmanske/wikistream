@@ -16,7 +16,7 @@ export default {
     setup() {
         const sections = ref(window.config?.sections || []);
 
-        const { items: recentlyViewed } = useRecentlyViewed();
+        const { items: recentlyViewed, clearViews, removeView } = useRecentlyViewed();
         const recentSection = computed(() => ({
             key: 'recently_viewed',
             title_key: 'recently_viewed',
@@ -28,14 +28,25 @@ export default {
         const { log } = useLog();
         log('main_page_loaded');
 
-        return { sections, recentSection, hasRecent };
+        return { sections, recentSection, hasRecent, clearViews, removeView };
+    },
+    methods: {
+        onRecentPurge() {
+            // Local browser state, but easy to mis-click on a trash icon — confirm once.
+            if (window.confirm('Clear all recently viewed items?')) {
+                this.clearViews();
+            }
+        },
+        onRecentRemove(q) {
+            this.removeView(q);
+        },
     },
     template: `
         <div class="container-fluid">
             <page-header></page-header>
             <div class="row">
                 <div style="width:100%;">
-                    <section-row v-if="hasRecent" :section="recentSection"></section-row>
+                    <section-row v-if="hasRecent" :section="recentSection" removable @purge="onRecentPurge" @remove="onRecentRemove"></section-row>
                     <section-row v-for="section in sections" :key="section.title_key || section.title" :section="section"></section-row>
                 </div>
             </div>
