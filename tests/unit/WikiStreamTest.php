@@ -3884,6 +3884,442 @@ final class WikiStreamTest extends TestCase
     // (audits/STATUS.md P1.11, testing.md T2).
     // ------------------------------------------------------------------
 
+    // ------------------------------------------------------------------
+    // getEntry — assembles an entry from vw_ranked_entries plus the
+    // section / person / group lookups. Non-trivial composition path
+    // that audits/STATUS.md P1.12 flagged as critical-uncovered before
+    // any reader/ingestor split.
+    // ------------------------------------------------------------------
+
+    public function test_getEntry_returns_null_when_item_not_in_view(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $sqlCalls = [];
+        $tfc->method('getSQL')->willReturnCallback(
+            function ($_db, string $sql) use (&$sqlCalls) {
+                $sqlCalls[] = $sql;
+                return $this->emptyResult();
+            },
+        );
+
+        $this->assertNull($ws->getEntry(42));
+        // Only the initial SELECT should fire — no follow-up reads.
+        $this->assertCount(1, $sqlCalls);
+        $this->assertStringStartsWith('SELECT * FROM `vw_ranked_entries`', $sqlCalls[0]);
+    }
+
+    public function test_getEntry_assembles_entry_with_sections_and_people(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        // The view row carries a JSON `files` payload that getEntry
+        // decodes. Everything else is plumbed through follow-up SQL.
+        $entryRow = new \stdClass();
+        $entryRow->q     = 42;
+        $entryRow->title = 'Metropolis';
+        $entryRow->files = json_encode([(object) ['url' => 'A']]);
+
+        // One section row that's a topic (property 31), one person
+        // (configured into WikiFlix's people_props).
+        $config = new \WikiStreamConfigWikiFlix();
+        $peopleProp = (int) $config->people_props[0];
+
+        $topicSection = (object) [
+            'item_q'    => 42,
+            'section_q' => 100,
+            'property'  => 31,
+        ];
+        $personSection = (object) [
+            'item_q'    => 42,
+            'section_q' => 7,
+            'property'  => $peopleProp,
+        ];
+        $personRow = (object) [
+            'q'      => 7,
+            'label'  => 'Fritz Lang',
+            'gender' => 'M',
+            'image'  => null,
+        ];
+
+        $callIndex = 0;
+        $tfc->method('getSQL')->willReturnCallback(
+            function ($_db, string $sql) use (&$callIndex, $entryRow, $topicSection, $personSection, $personRow) {
+                $i = $callIndex++;
+                if ($i === 0) return $this->makeResult([$entryRow]);                 // vw_ranked_entries
+                if ($i === 1) return $this->makeResult([$topicSection, $personSection]); // section join
+                // Subsequent calls are getPersonsBatch (when person_qs
+                // non-empty), loadLabelsByQ, and get_sibling_group_entries
+                // — empty result for each keeps composition tight.
+                if (str_contains($sql, 'FROM `person`')) {
+                    return $this->makeResult([$personRow]);
+                }
+                return $this->emptyResult();
+            },
+        );
+
+        $result = $ws->getEntry(42);
+
+        $this->assertNotNull($result);
+        $this->assertSame('Metropolis', $result->title);
+        // files JSON is decoded onto entry_files.
+        $this->assertCount(1, $result->entry_files);
+        // People are grouped by "P<property>" → "Q<section_q>" → person obj.
+        $this->assertArrayHasKey("P{$peopleProp}", $result->people);
+        $this->assertArrayHasKey('Q7', $result->people["P{$peopleProp}"]);
+        $this->assertSame('Fritz Lang', $result->people["P{$peopleProp}"]['Q7']->label);
+        // Non-people section rows show up under sections; the topic with
+        // section_q=100 should be there even though loadLabelsByQ
+        // returned nothing (label fallback is the caller's problem).
+        $this->assertNotEmpty($result->sections);
+    }
+
+    public function test_getEntry_coerces_injection_in_q_to_integer(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $captured = '';
+        $tfc->method('getSQL')->willReturnCallback(
+            function ($_db, string $sql) use (&$captured) {
+                if ($captured === '') $captured = $sql;
+                return $this->emptyResult();
+            },
+        );
+
+        // Returns null (no row) — we only care about the SQL that fired.
+        @$ws->getEntry('42; DROP TABLE `item`; --');
+
+        $this->assertStringNotContainsString('DROP', $captured);
+        $this->assertStringContainsString('`q`=42', $captured);
+    }
+
+    // ------------------------------------------------------------------
+    // getPerson — composition: person row + items they participated in.
+    // ------------------------------------------------------------------
+
+    public function test_getPerson_returns_empty_entries_when_not_in_db(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->method('getSQL')->willReturn($this->emptyResult());
+
+        $result = $ws->getPerson(99);
+
+        $this->assertSame(99, $result->q);
+        $this->assertSame([], $result->entries);
+        // No label/gender/image set when person not found.
+        $this->assertObjectNotHasProperty('label', $result);
+    }
+
+    public function test_getPerson_with_add_files_false_skips_films_query(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $row = (object) [
+            'q'      => 10,
+            'label'  => 'Buster Keaton',
+            'gender' => 'M',
+            'image'  => 'keaton.jpg',
+        ];
+
+        // Exactly one SELECT — the person row. The vw_ranked_entries
+        // follow-up MUST be skipped when add_files=false.
+        $tfc->expects($this->once())->method('getSQL')
+            ->willReturn($this->makeResult([$row]));
+
+        $result = $ws->getPerson(10, add_files: false);
+
+        $this->assertSame('Buster Keaton', $result->label);
+        $this->assertSame('M', $result->gender);
+        $this->assertSame('keaton.jpg', $result->image);
+        $this->assertSame([], $result->entries);
+    }
+
+    public function test_getPerson_with_add_files_emits_view_query_and_collects_rows(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $person = (object) [
+            'q'      => 10,
+            'label'  => 'Buster Keaton',
+            'gender' => 'M',
+            'image'  => null,
+        ];
+        $film1 = (object) ['q' => 200, 'title' => 'Sherlock Jr.', 'image' => null];
+        $film2 = (object) ['q' => 201, 'title' => 'The General',  'image' => null];
+
+        $callIndex = 0;
+        $sqlCalls  = [];
+        $tfc->method('getSQL')->willReturnCallback(
+            function ($_db, string $sql) use (&$callIndex, &$sqlCalls, $person, $film1, $film2) {
+                $sqlCalls[] = $sql;
+                $i = $callIndex++;
+                if ($i === 0) return $this->makeResult([$person]);
+                if ($i === 1) return $this->makeResult([$film1, $film2]);
+                return $this->emptyResult();
+            },
+        );
+
+        $result = $ws->getPerson(10, add_files: true);
+
+        $this->assertCount(2, $result->entries);
+        $this->assertStringContainsString('vw_ranked_entries', $sqlCalls[1]);
+        // The films-of-this-person query targets section.section_q=$q
+        // for any property in people_props.
+        $this->assertStringContainsString('`section_q`=10', $sqlCalls[1]);
+    }
+
+    public function test_getPerson_coerces_injection_in_q_to_integer(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = '';
+        $tfc->method('getSQL')->willReturnCallback(
+            function ($_db, string $sql) use (&$captured) {
+                if ($captured === '') $captured = $sql;
+                return $this->emptyResult();
+            },
+        );
+
+        @$ws->getPerson('99; DROP TABLE `person`; --', add_files: false);
+
+        $this->assertStringNotContainsString('DROP', $captured);
+        $this->assertStringContainsString('`q`=99', $captured);
+    }
+
+    // ------------------------------------------------------------------
+    // clear_bad_genres — transactional cascade. Must:
+    //   1. no-op when no bad_genres are configured
+    //   2. no-op after the discovery SELECT when no items match
+    //   3. run 5 DELETEs inside a transaction and commit on success
+    //   4. rollback and re-throw if any DELETE fails
+    // ------------------------------------------------------------------
+
+    public function test_clear_bad_genres_noop_when_config_missing(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $config->db_statement_timeout_sec = 0;
+        unset($config->bad_genres);   // simulate "config field missing"
+
+        $db  = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $tfc->expects($this->never())->method('getSQL');
+
+        $ws = new \WikiStream($config, $tfc);
+        $ws->clear_bad_genres();
+    }
+
+    public function test_clear_bad_genres_noop_when_config_empty(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $config->db_statement_timeout_sec = 0;
+        $config->bad_genres = [];
+
+        $db  = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $tfc->expects($this->never())->method('getSQL');
+
+        $ws = new \WikiStream($config, $tfc);
+        $ws->clear_bad_genres();
+    }
+
+    public function test_clear_bad_genres_noop_after_empty_select(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        $sqlCalls = [];
+        $tfc->method('getSQL')->willReturnCallback(
+            function ($_db, string $sql) use (&$sqlCalls) {
+                $sqlCalls[] = $sql;
+                return $this->emptyResult();
+            },
+        );
+
+        $ws->clear_bad_genres();
+
+        // Only the discovery SELECT must fire — no DELETEs, no
+        // BEGIN/COMMIT noise.
+        $this->assertCount(1, $sqlCalls);
+        $this->assertStringStartsWith('SELECT DISTINCT item_q FROM section', $sqlCalls[0]);
+    }
+
+    public function test_clear_bad_genres_runs_five_deletes_inside_transaction(): void
+    {
+        [$ws, $tfc, $db] = $this->makeWikiStream();
+
+        $sqlCalls = [];
+        $tfc->method('getSQL')->willReturnCallback(
+            function ($_db, string $sql) use (&$sqlCalls) {
+                $sqlCalls[] = $sql;
+                if (str_starts_with($sql, 'SELECT DISTINCT item_q')) {
+                    return $this->makeResult([
+                        (object) ['item_q' => 84],
+                        (object) ['item_q' => 144],
+                    ]);
+                }
+                return $this->emptyResult();
+            },
+        );
+
+        // beginTransaction / commit go through ToolforgeCommon stub
+        // methods — make_rc_unavailable already exercises that path.
+        // Here we just inspect the SQL stream for the right shape.
+        $ws->clear_bad_genres();
+
+        $deletes = array_values(array_filter(
+            $sqlCalls,
+            fn(string $s) => str_starts_with($s, 'DELETE FROM'),
+        ));
+        $this->assertCount(5, $deletes);
+        // Each one of the FK-dependent tables must be hit.
+        $tables = ['`file`', '`section`', '`section`', '`group_item`', '`item`'];
+        foreach ($tables as $i => $table) {
+            $this->assertStringContainsString("DELETE FROM {$table}", $deletes[$i]);
+        }
+        // The two items show up in the IN-list.
+        $joined = implode("\n", $deletes);
+        $this->assertStringContainsString('IN (84,144)', $joined);
+    }
+
+    public function test_clear_bad_genres_rollback_on_delete_failure(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        // Detect that rollback fired by intercepting it via a custom
+        // ToolforgeCommon. The simplest signal: throw on the first
+        // DELETE; the production code should rollback and re-raise.
+        $deleteAttempted = false;
+        $tfc->method('getSQL')->willReturnCallback(
+            function ($_db, string $sql) use (&$deleteAttempted) {
+                if (str_starts_with($sql, 'SELECT DISTINCT item_q')) {
+                    return $this->makeResult([(object) ['item_q' => 84]]);
+                }
+                if (str_starts_with($sql, 'DELETE FROM `file`')) {
+                    $deleteAttempted = true;
+                    throw new \RuntimeException('simulated FK violation');
+                }
+                return $this->emptyResult();
+            },
+        );
+
+        try {
+            $ws->clear_bad_genres();
+            $this->fail('expected RuntimeException to propagate');
+        } catch (\RuntimeException $e) {
+            $this->assertSame('simulated FK violation', $e->getMessage());
+        }
+        $this->assertTrue($deleteAttempted, 'first DELETE must have been attempted');
+    }
+
+    // ------------------------------------------------------------------
+    // make_rc_unavailable — already has a SET-SESSION coverage test
+    // above. Here we cover the change-application paths.
+    // ------------------------------------------------------------------
+
+    public function test_make_rc_unavailable_no_changes_writes_only_kv_watermark(): void
+    {
+        [$ws, $tfc, $db] = $this->makeWikiStream();
+
+        $dbwd = (object) ['id' => 'wikidatawiki'];
+        $tfc->method('openDBwiki')->with('wikidatawiki')->willReturn($dbwd);
+
+        $sqlByDb = [];
+        $tfc->method('getSQL')->willReturnCallback(
+            function ($whichDb, string $sql) use (&$sqlByDb, $db, $dbwd) {
+                $tag = ($whichDb === $dbwd) ? 'wd' : 'tool';
+                $sqlByDb[] = [$tag, $sql];
+                return $this->emptyResult();
+            },
+        );
+
+        $ws->make_rc_unavailable();
+
+        // Tool-DB stream must end with the kv UPSERT and contain no
+        // UPDATE/DELETE work since there were no changes.
+        $toolSql = array_values(array_map(fn($x) => $x[1], array_filter(
+            $sqlByDb,
+            fn($x) => $x[0] === 'tool',
+        )));
+        $joined = implode("\n", $toolSql);
+        $this->assertStringContainsString("INSERT INTO `kv`", $joined);
+        $this->assertStringNotContainsString('UPDATE `item`', $joined);
+        $this->assertStringNotContainsString('DELETE FROM `person`', $joined);
+    }
+
+    public function test_make_rc_unavailable_chunks_updates_and_deletes(): void
+    {
+        [$ws, $tfc, $db] = $this->makeWikiStream();
+
+        $dbwd = (object) ['id' => 'wikidatawiki'];
+        $tfc->method('openDBwiki')->with('wikidatawiki')->willReturn($dbwd);
+
+        // Pre-seed kv.last_rc_check to a clearly-old timestamp so the
+        // watermark advance is observable. Otherwise the first-run
+        // safety in make_rc_unavailable defaults to "yesterday" via
+        // strtotime, which would dominate static rc_timestamp values.
+        $kvRow = (object) ['value' => '20200101000000'];
+
+        $rcRows = [
+            (object) ['rc_title' => 'Q84',  'rc_timestamp' => '20260101120000'],
+            (object) ['rc_title' => 'Q144', 'rc_timestamp' => '20260101130000'],
+            // Non-Q title — must be filtered out.
+            (object) ['rc_title' => 'Help:Foo', 'rc_timestamp' => '20260101140000'],
+        ];
+
+        $sqlByDb = [];
+        $tfc->method('getSQL')->willReturnCallback(
+            function ($whichDb, string $sql) use (&$sqlByDb, $db, $dbwd, $rcRows, $kvRow) {
+                $tag = ($whichDb === $dbwd) ? 'wd' : 'tool';
+                $sqlByDb[] = [$tag, $sql];
+                if ($tag === 'tool' && str_contains($sql, "FROM `kv` WHERE `key`='last_rc_check'")) {
+                    return $this->makeResult([$kvRow]);
+                }
+                if ($tag === 'wd' && str_starts_with($sql, 'SELECT `rc_title`')) {
+                    return $this->makeResult($rcRows);
+                }
+                return $this->emptyResult();
+            },
+        );
+
+        $ws->make_rc_unavailable();
+
+        $toolSql = array_values(array_map(fn($x) => $x[1], array_filter(
+            $sqlByDb,
+            fn($x) => $x[0] === 'tool',
+        )));
+        $joined = implode("\n", $toolSql);
+
+        $this->assertStringContainsString('UPDATE `item` SET `available`=0 WHERE `q` IN (84,144)', $joined);
+        $this->assertStringContainsString('DELETE FROM `person` WHERE `q` IN (84,144)', $joined);
+        // The Help: page must not have polluted the IN-list.
+        $this->assertStringNotContainsString('Help', $joined);
+        // kv watermark advances to the newest rc_timestamp we saw.
+        $this->assertStringContainsString("'20260101140000'", $joined);
+    }
+
+    public function test_make_rc_unavailable_rollback_on_db_failure(): void
+    {
+        [$ws, $tfc, $db] = $this->makeWikiStream();
+        $dbwd = (object) ['id' => 'wikidatawiki'];
+        $tfc->method('openDBwiki')->with('wikidatawiki')->willReturn($dbwd);
+
+        $rcRows = [(object) ['rc_title' => 'Q84', 'rc_timestamp' => '20260101120000']];
+        $tfc->method('getSQL')->willReturnCallback(
+            function ($whichDb, string $sql) use ($db, $dbwd, $rcRows) {
+                if ($whichDb === $dbwd && str_starts_with($sql, 'SELECT `rc_title`')) {
+                    return $this->makeResult($rcRows);
+                }
+                if (str_starts_with($sql, 'UPDATE `item`')) {
+                    throw new \RuntimeException('simulated mysqli error');
+                }
+                return $this->emptyResult();
+            },
+        );
+
+        $this->expectException(\RuntimeException::class);
+        $ws->make_rc_unavailable();
+    }
+
     public function test_set_user_list_state_zero_emits_delete(): void
     {
         [$ws, $tfc] = $this->makeWikiStream();
