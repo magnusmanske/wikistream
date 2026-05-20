@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Hard rules
 
 - **Do not add the Claude attribution to commit messages.** No `Co-Authored-By: Claude …` line.
+- **`git commit` is pre-authorized; `git push` is not.** When work is complete and the diff is reviewable, you may run `git add <specific files>` + `git commit` without asking — this is durable authorization. **Never `git push`, `git push --force`, or otherwise publish commits to a remote without an explicit per-action request from the user.** Same for any other remote-publishing action (PR creation, branch deletion on origin, etc.). Use sensible commit groupings for larger changes.
+- **`audits/`, `CLAUDE.md`, and `.claude/` are all gitignored.** Don't try to git-add them; treat audit files as durable scratch.
 - **Never alter the production database**, no additions, alterations, deletions, unless specifically told to.
 - **Never write/alter/add/delete files in `public_html/resources` or `public_html/php`** — these are synced from the Magnus-tools shared library. wikistream-specific Vue/ES6 code lives under `public_html/vue_components/` (Composition API ES modules) and imports from the shared library by relative path.
 - **Keep mobile in mind.** — mobile-first design, responsive layouts, and touch-friendly interactions.
@@ -15,7 +17,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Adhere to **SOLID and DRY principles**.
 - Use **best practices** and **language standards**.
 - **Keep the code simple** and elegant.
+- **Aim to keep code small** where possible.
 - **Write tests** where it makes sense.
+- **Warn me if you think what I ask of you is a bad idea.** Or just window dressing, with no improvement of functionality, UX, or code readability. Be honest.
 - **YouTube must only be embedded via `youtube-nocookie.com`, never `youtube.com`.** Minimize data leakage to YouTube/Google: no Google scripts, fonts, or tracking pixels; no third-party cookies set from our origin.
 - **Stay in scope when ingesting items.** WikiFlix is exclusively about creative screen works (films, episodes, and the like); WikiVibes is exclusively about creative audio works (music, currently). People, places, topics, organisations, and similar non-creative-work items are out of scope as *primary* items and must never be ingested, even when they carry a P10/P51/etc. media statement. Supporting items (actors, directors, performers, series, …) are fine via the existing person/group/section tables. **Two-stage scope enforcement:** (1) every SPARQL discovery query in `$config->sparql` / `$config->episode_sparql` must constrain via `wdt:P31/wdt:P279*` to the appropriate root class (Q11424 film, Q21191270 TV episode, Q2188189 musical work, …) — this is the authoritative gatekeeper at ingestion time; (2) `WikiStream::purge_out_of_scope_items()` runs in the default cron pipeline and deletes anything whose post-fetch `primary_type_q` isn't a P279* descendant of `WikiStreamConfig*->scope_root_qs`. Don't add a per-item SPARQL re-check between those two stages — that's what the original implementation tried, and 500-Q VALUES batches were lossy under WDQS timeouts.
 
