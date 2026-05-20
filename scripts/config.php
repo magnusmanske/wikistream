@@ -79,12 +79,30 @@
 	 * in a subclass to add custom pseudo-section keys (e.g. "female_directors"
 	 * in WikiFlix). The base implementation returns an empty page.
 	 *
+	 * Reads back through a narrow ItemViewReader port (audits/STATUS.md
+	 * P1.1 / design.md A.3-b) so config doesn't form a dependency cycle
+	 * with the WikiStream god class.
+	 *
 	 * Returns ['entries' => list, 'total' => int]. `total` is the total count
 	 * of entries available for this key (independent of offset/limit).
 	 */
-	public function get_special_entries(&$ws, string $key, int $offset = 0, int $limit = PHP_INT_MAX): array
-	{
+	public function get_special_entries(
+		ItemViewReader $reader,
+		string $key,
+		int $offset = 0,
+		int $limit = PHP_INT_MAX,
+	): array {
 		return ['entries' => [], 'total' => 0];
+	}
+
+	/**
+	 * Tool-specific extra sections to append to the main-page payload.
+	 * Default no-op; subclasses override to push their own section
+	 * blocks into $out['sections'].
+	 */
+	public function add_special_sections(ItemViewReader $reader, array &$out): void
+	{
+		// no-op
 	}
 }
 
@@ -222,31 +240,35 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig
 		"episode_type_qs" => [21191270],
 	];
 
-	public function add_special_sections(&$ws, &$out): void
+	public function add_special_sections(ItemViewReader $reader, array &$out): void
 	{
 		$out["sections"][] = [
 			"key" => "female_directors",
 			"title_key" => "female_directors",
 			"title" => "Female directors",
-			"entries" => $this->get_items_by_female_directors($ws, 25),
+			"entries" => $this->get_items_by_female_directors($reader, 25),
 		];
 	}
 
 	const FEMALE_DIRECTORS_SUBQUERY = 'SELECT DISTINCT `item_q` FROM `section`,`person` WHERE `property`=57 AND `person`.`q`=`section_q` AND `person`.`gender`="F"';
 
-	public function get_special_entries(&$ws, string $key, int $offset = 0, int $limit = PHP_INT_MAX): array
-	{
+	public function get_special_entries(
+		ItemViewReader $reader,
+		string $key,
+		int $offset = 0,
+		int $limit = PHP_INT_MAX,
+	): array {
 		switch ($key) {
 			case "female_directors":
 				return [
-					'entries' => $ws->get_item_view(
+					'entries' => $reader->get_item_view(
 						"vw_ranked_entries_blacklist",
 						$limit,
 						null,
 						self::FEMALE_DIRECTORS_SUBQUERY,
 						$offset,
 					),
-					'total' => $ws->get_item_view_count(
+					'total' => $reader->get_item_view_count(
 						"vw_ranked_entries_blacklist",
 						null,
 						self::FEMALE_DIRECTORS_SUBQUERY,
@@ -261,11 +283,11 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig
 	 * page of female-director entries.
 	 */
 	protected function get_items_by_female_directors(
-		&$ws,
-		$num = 25,
-		$section_q = null
+		ItemViewReader $reader,
+		int $num = 25,
+		?int $section_q = null,
 	): array {
-		return $ws->get_item_view(
+		return $reader->get_item_view(
 			"vw_ranked_entries_blacklist",
 			$num,
 			$section_q,
@@ -317,7 +339,7 @@ class WikiStreamConfigWikiVibes extends WikiStreamConfig
 		"episode_type_qs" => [],
 	];
 
-	public function add_special_sections(&$ws, &$out): void
+	public function add_special_sections(ItemViewReader $reader, array &$out): void
 	{
 		# Nothing
 	}

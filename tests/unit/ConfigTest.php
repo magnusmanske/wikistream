@@ -321,6 +321,154 @@ final class ConfigTest extends TestCase
     }
 
     // ------------------------------------------------------------------
+    // ItemViewReader port — audits/STATUS.md P1.1 / design.md A.3-b.
+    //
+    // Config methods used to take `&$ws` and call back into the
+    // WikiStream god class, forming an architectural cycle. They now
+    // take an ItemViewReader; tests can wire any object satisfying
+    // that contract (here, an in-line fake) so the configs are
+    // testable without spinning up a full WikiStream + ToolforgeCommon
+    // stack.
+    // ------------------------------------------------------------------
+
+    public function test_wikistream_implements_itemview_reader(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $config->db_statement_timeout_sec = 0;
+
+        $tfc = $this->createStub(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn(new \stdClass());
+        $ws = new \WikiStream($config, $tfc);
+
+        $this->assertInstanceOf(\ItemViewReader::class, $ws);
+    }
+
+    public function test_wikiflix_get_special_entries_calls_reader_for_female_directors(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+
+        // In-line ItemViewReader fake: no WikiStream, no ToolforgeCommon,
+        // no DB. We just record what config asked for.
+        $reader = new class implements \ItemViewReader {
+            public array $viewCalls  = [];
+            public array $countCalls = [];
+            public function get_item_view(
+                string $view_name,
+                int $num = 25,
+                ?int $section_q = null,
+                ?string $subquery = null,
+                int $offset = 0,
+            ): array {
+                $this->viewCalls[] = compact('view_name', 'num', 'section_q', 'subquery', 'offset');
+                return [(object) ['q' => 1, 'title' => 'A'], (object) ['q' => 2, 'title' => 'B']];
+            }
+            public function get_item_view_count(
+                string $view_name,
+                ?int $section_q = null,
+                ?string $subquery = null,
+            ): int {
+                $this->countCalls[] = compact('view_name', 'section_q', 'subquery');
+                return 42;
+            }
+        };
+
+        $page = $config->get_special_entries($reader, 'female_directors', 50, 25);
+
+        $this->assertSame(42, $page['total']);
+        $this->assertCount(2, $page['entries']);
+
+        // Exactly one view call + one count call, both targeting the
+        // blacklist-filtered ranked view with the female-directors
+        // subquery. Offset/limit/num threaded through.
+        $this->assertCount(1, $reader->viewCalls);
+        $this->assertSame('vw_ranked_entries_blacklist', $reader->viewCalls[0]['view_name']);
+        $this->assertSame(25, $reader->viewCalls[0]['num']);
+        $this->assertSame(50, $reader->viewCalls[0]['offset']);
+        $this->assertStringContainsString('gender`="F"', $reader->viewCalls[0]['subquery']);
+
+        $this->assertCount(1, $reader->countCalls);
+        $this->assertSame('vw_ranked_entries_blacklist', $reader->countCalls[0]['view_name']);
+    }
+
+    public function test_wikiflix_get_special_entries_unknown_key_skips_reader(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+
+        $reader = new class implements \ItemViewReader {
+            public int $viewCallCount = 0;
+            public function get_item_view(
+                string $view_name, int $num = 25, ?int $section_q = null,
+                ?string $subquery = null, int $offset = 0,
+            ): array {
+                $this->viewCallCount++;
+                return [];
+            }
+            public function get_item_view_count(
+                string $view_name, ?int $section_q = null, ?string $subquery = null,
+            ): int { return 0; }
+        };
+
+        $page = $config->get_special_entries($reader, 'not_a_real_key');
+
+        $this->assertSame([], $page['entries']);
+        $this->assertSame(0, $page['total']);
+        $this->assertSame(0, $reader->viewCallCount, 'unknown key must not hit the reader');
+    }
+
+    public function test_wikiflix_add_special_sections_threads_reader_through(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+
+        $reader = new class implements \ItemViewReader {
+            public array $captured = [];
+            public function get_item_view(
+                string $view_name, int $num = 25, ?int $section_q = null,
+                ?string $subquery = null, int $offset = 0,
+            ): array {
+                $this->captured[] = $view_name;
+                return [(object) ['q' => 99]];
+            }
+            public function get_item_view_count(
+                string $view_name, ?int $section_q = null, ?string $subquery = null,
+            ): int { return 0; }
+        };
+
+        $out = ['sections' => []];
+        $config->add_special_sections($reader, $out);
+
+        $this->assertCount(1, $out['sections']);
+        $this->assertSame('female_directors', $out['sections'][0]['key']);
+        $this->assertCount(1, $out['sections'][0]['entries']);
+        // The reader saw exactly the blacklist-filtered ranked view.
+        $this->assertSame(['vw_ranked_entries_blacklist'], $reader->captured);
+    }
+
+    public function test_base_get_special_entries_returns_empty_without_touching_reader(): void
+    {
+        // Use a Vibes config; its overridden add_special_sections is a
+        // no-op but it inherits the base get_special_entries which
+        // also doesn't read.
+        $config = new \WikiStreamConfigWikiVibes();
+
+        $reader = new class implements \ItemViewReader {
+            public function get_item_view(
+                string $view_name, int $num = 25, ?int $section_q = null,
+                ?string $subquery = null, int $offset = 0,
+            ): array {
+                throw new \LogicException('reader must not be called');
+            }
+            public function get_item_view_count(
+                string $view_name, ?int $section_q = null, ?string $subquery = null,
+            ): int {
+                throw new \LogicException('reader must not be called');
+            }
+        };
+
+        $page = $config->get_special_entries($reader, 'anything');
+        $this->assertSame(['entries' => [], 'total' => 0], $page);
+    }
+
+    // ------------------------------------------------------------------
     // WikiFlix performer_prop is P161 (cast member / actor)
     // WikiVibes performer_prop is P175 (performer)
     // ------------------------------------------------------------------

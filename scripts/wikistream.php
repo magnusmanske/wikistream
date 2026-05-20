@@ -9,6 +9,7 @@ if (!class_exists('ToolforgeCommon')) {
 if (!class_exists('WikidataItem') || !class_exists('WikidataItemList')) {
 	require_once __DIR__ . "/../public_html/php/wikidata.php";
 }
+require_once __DIR__ . "/../scripts/ItemViewReader.php";
 require_once __DIR__ . "/../scripts/config.php";
 require_once __DIR__ . "/../scripts/HttpClient.php";
 
@@ -19,7 +20,7 @@ require_once __DIR__ . "/../scripts/HttpClient.php";
  */
 class BadGenreException extends \RuntimeException {}
 
-class WikiStream
+class WikiStream implements ItemViewReader
 {
 	// Wikidata item/property IDs used in PHP logic
 	private const WD_GENDER_MALE        = "Q6581097";
@@ -1649,15 +1650,15 @@ class WikiStream
 	}
 
 	public function get_item_view(
-		$view_name,
-		$num = 25,
-		$section_q = null,
-		$subquery = null,
-		$offset = 0,
+		string $view_name,
+		int $num = 25,
+		?int $section_q = null,
+		?string $subquery = null,
+		int $offset = 0,
 	): array {
 		$ret = [];
-		$num_safe    = max(0, (int) $num);
-		$offset_safe = max(0, (int) $offset);
+		$num_safe    = max(0, $num);
+		$offset_safe = max(0, $offset);
 		$sql = "SELECT * FROM `{$view_name}` WHERE 1=1";
 		if (isset($section_q) and $section_q != null) {
 			$sql .= " AND `q` IN (SELECT item_q FROM section WHERE section_q={$section_q})";
@@ -1678,7 +1679,11 @@ class WikiStream
 		return $ret;
 	}
 
-	public function get_item_view_count($view_name, $section_q = null, $subquery = null): int
+	public function get_item_view_count(
+		string $view_name,
+		?int $section_q = null,
+		?string $subquery = null,
+	): int
 	{
 		$sql = "SELECT COUNT(*) AS `cnt` FROM `{$view_name}` WHERE 1=1";
 		if (isset($section_q) and $section_q != null) {
