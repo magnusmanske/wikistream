@@ -9,16 +9,18 @@ use PHPUnit\Framework\TestCase;
 use ReflectionMethod;
 
 /**
- * Tests for WikiStream::parse_seconds().
+ * Tests for QuickStatementsBot::parse_seconds().
  *
- * The method is private static, so we invoke it via ReflectionMethod.
- * Every regex branch is covered, including the < 120 second filter.
+ * The method is protected static (used by annotate_ia_movies to read
+ * IA's runtime / per-file length strings); we invoke it via
+ * ReflectionMethod. Every regex branch is covered, including the
+ * < 120 second filter.
  */
 final class ParseSecondsTest extends TestCase
 {
     private static function parse(string $input): int
     {
-        $m = new ReflectionMethod(\WikiStream::class, 'parse_seconds');
+        $m = new ReflectionMethod(\QuickStatementsBot::class, 'parse_seconds');
         return $m->invoke(null, $input);
     }
 

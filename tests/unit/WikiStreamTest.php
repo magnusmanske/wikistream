@@ -2154,14 +2154,38 @@ final class WikiStreamTest extends TestCase
      *
      * @SuppressWarnings(PHPMD.ShortVariable)
      */
-    private function makeQsCapturingWikiStream(\ToolforgeCommon $tfc): object
+    /**
+     * Like makeRecordingWikiStream but without a pre-populated
+     * WikidataItemList — for bot methods (e.g. annotate_*) that don't
+     * need to inspect Wikidata items. Optionally accepts a custom
+     * HttpClient for tests that drive HTTP behaviour from outside.
+     */
+    private function makeQsCapturingWikiStream(\ToolforgeCommon $tfc, ?\HttpClientInterface $http = null): object
     {
         $config = new \WikiStreamConfigWikiFlix();
-        return new class($config, $tfc, null) extends \WikiStream {
+        $config->db_statement_timeout_sec = 0;
+
+        $db   = $this->makeFakeDb();
+        $http ??= $this->createMock(\HttpClientInterface::class);
+
+        $bot = new class($config, $tfc, $db, $http) extends \QuickStatementsBot {
             public array $capturedCommands = [];
             protected function pushQuickStatements(array $commands): void
             {
                 $this->capturedCommands = $commands;
+            }
+        };
+
+        return new class($config, $tfc, null, $bot) extends \WikiStream {
+            public \QuickStatementsBot $botRef;
+            public function __construct($config, $tfc, $http, \QuickStatementsBot $bot)
+            {
+                parent::__construct($config, $tfc, $http, $bot);
+                $this->botRef = $bot;
+            }
+            public function __get(string $name): mixed
+            {
+                return $name === 'capturedCommands' ? $this->botRef->capturedCommands : null;
             }
         };
     }
@@ -2212,7 +2236,7 @@ final class WikiStreamTest extends TestCase
         $ws = $this->makeQsCapturingWikiStream($tfc);
         $ws->annotate_pre_1900_public_domain();
 
-        $this->assertSame(\WikiStream::PRE_1900_PD_PER_RUN, count($ws->capturedCommands));
+        $this->assertSame(\QuickStatementsBot::PRE_1900_PD_PER_RUN, count($ws->capturedCommands));
     }
 
     /**
@@ -2277,14 +2301,7 @@ final class WikiStreamTest extends TestCase
             return $r;
         });
 
-        $config = new \WikiStreamConfigWikiFlix();
-        $ws = new class($config, $tfc, $http) extends \WikiStream {
-            public array $capturedCommands = [];
-            protected function pushQuickStatements(array $commands): void
-            {
-                $this->capturedCommands = $commands;
-            }
-        };
+        $ws = $this->makeQsCapturingWikiStream($tfc, $http);
         $ws->import_ia_curated_imdb_p724();
 
         $this->assertCount(2, $ws->capturedCommands, 'Two resolved IMDb IDs should yield two commands.');
@@ -2366,14 +2383,7 @@ final class WikiStreamTest extends TestCase
             return null;
         });
 
-        $config = new \WikiStreamConfigWikiFlix();
-        $ws = new class($config, $tfc, $http) extends \WikiStream {
-            public array $capturedCommands = [];
-            protected function pushQuickStatements(array $commands): void
-            {
-                $this->capturedCommands = $commands;
-            }
-        };
+        $ws = $this->makeQsCapturingWikiStream($tfc, $http);
         $ws->import_commons_pd_films_via_p180();
 
         $joined = implode("\n", $ws->capturedCommands);
@@ -2401,14 +2411,7 @@ final class WikiStreamTest extends TestCase
             return $r;
         });
 
-        $config = new \WikiStreamConfigWikiFlix();
-        $ws = new class($config, $tfc, $http) extends \WikiStream {
-            public array $capturedCommands = [];
-            protected function pushQuickStatements(array $commands): void
-            {
-                $this->capturedCommands = $commands;
-            }
-        };
+        $ws = $this->makeQsCapturingWikiStream($tfc, $http);
         $ws->import_commons_pd_films_via_p180();
 
         $this->assertCount(0, $ws->capturedCommands);
@@ -2432,14 +2435,7 @@ final class WikiStreamTest extends TestCase
             return $r;
         });
 
-        $config = new \WikiStreamConfigWikiFlix();
-        $ws = new class($config, $tfc, $http) extends \WikiStream {
-            public array $capturedCommands = [];
-            protected function pushQuickStatements(array $commands): void
-            {
-                $this->capturedCommands = $commands;
-            }
-        };
+        $ws = $this->makeQsCapturingWikiStream($tfc, $http);
         $ws->import_ia_curated_imdb_p724();
 
         $this->assertCount(0, $ws->capturedCommands);
@@ -2611,17 +2607,38 @@ final class WikiStreamTest extends TestCase
     }
 
     /**
+     * Build a WikiStream wired to a recording QuickStatementsBot — i.e.
+     * one whose `pushQuickStatements` captures commands instead of
+     * pushing them, and whose `loadWikidataItemList` returns the
+     * pre-populated `$wil` rather than calling out to Wikidata.
+     *
+     * The bot is exposed at `$ws->capturedCommands` (via __get) so
+     * tests written before the QuickStatementsBot extraction keep
+     * working without rewrites.
+     *
      * @SuppressWarnings(PHPMD.ShortVariable)
      */
     private function makeRecordingWikiStream(\WikidataItemList $wil, \ToolforgeCommon $tfc): object
     {
         $config = new \WikiStreamConfigWikiFlix();
-        return new class($config, $tfc, null, $wil) extends \WikiStream {
+        $config->db_statement_timeout_sec = 0;
+
+        // The bot needs a $db value to pass to its parent constructor,
+        // but never actually issues SQL when its overrides catch every
+        // pushQuickStatements / loadWikidataItemList call. A fake DB
+        // suffices — the recording overrides cover everything except
+        // the few methods (e.g. import_ia_curated_films) that ALSO
+        // need get_items_in_db, which routes through $tfc->getSQL the
+        // way every other test in this file expects.
+        $db   = $this->makeFakeDb();
+        $http = $this->createMock(\HttpClientInterface::class);
+
+        $bot = new class($config, $tfc, $db, $http, $wil) extends \QuickStatementsBot {
             public array $capturedCommands = [];
             private \WikidataItemList $injectedWil;
-            public function __construct($config, $tfc, $http, \WikidataItemList $wil)
+            public function __construct($config, $tfc, $db, \HttpClientInterface $http, \WikidataItemList $wil)
             {
-                parent::__construct($config, $tfc, $http);
+                parent::__construct($config, $tfc, $db, $http);
                 $this->injectedWil = $wil;
             }
             protected function loadWikidataItemList(array $qs): \WikidataItemList
@@ -2632,6 +2649,19 @@ final class WikiStreamTest extends TestCase
             protected function pushQuickStatements(array $commands): void
             {
                 $this->capturedCommands = $commands;
+            }
+        };
+
+        return new class($config, $tfc, null, $bot) extends \WikiStream {
+            public \QuickStatementsBot $botRef;
+            public function __construct($config, $tfc, $http, \QuickStatementsBot $bot)
+            {
+                parent::__construct($config, $tfc, $http, $bot);
+                $this->botRef = $bot;
+            }
+            public function __get(string $name): mixed
+            {
+                return $name === 'capturedCommands' ? $this->botRef->capturedCommands : null;
             }
         };
     }
@@ -2846,7 +2876,7 @@ final class WikiStreamTest extends TestCase
         $ws = $this->makeRecordingWikiStream($wil, $tfc);
         $ws->import_p953_urls();
 
-        $this->assertSame(\WikiStream::P953_COMMANDS_PER_RUN, count($ws->capturedCommands));
+        $this->assertSame(\QuickStatementsBot::P953_COMMANDS_PER_RUN, count($ws->capturedCommands));
     }
 
     // ------------------------------------------------------------------
