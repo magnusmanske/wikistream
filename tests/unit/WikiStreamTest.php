@@ -33,6 +33,11 @@ final class WikiStreamTest extends TestCase
         ?\HttpClientInterface $httpClient = null,
     ): array {
         $config ??= new \WikiStreamConfigWikiFlix();
+        // Disable the per-session statement-timeout SET so existing tests
+        // can keep using `$tfc->expects($this->never())->method('getSQL')`
+        // without tripping on the constructor's bookkeeping query.
+        // The SET-SESSION behaviour itself is covered separately below.
+        $config->db_statement_timeout_sec = 0;
 
         $db  = $this->makeFakeDb();
         $tfc = $this->createMock(\ToolforgeCommon::class);
@@ -1244,6 +1249,10 @@ final class WikiStreamTest extends TestCase
     private function makeBackfillWikiStream(\WikidataItemList $wil, \ToolforgeCommon $tfc): \WikiStream
     {
         $config = new \WikiStreamConfigWikiFlix();
+        // See makeWikiStream — keep the constructor's SET SESSION call out
+        // of the per-test getSQL capture so existing assertions on the
+        // first call stay valid.
+        $config->db_statement_timeout_sec = 0;
         return new class($config, $tfc, null, $wil) extends \WikiStream {
             private \WikidataItemList $injectedWil;
             public function __construct($config, $tfc, $http, \WikidataItemList $wil)
@@ -3569,5 +3578,116 @@ final class WikiStreamTest extends TestCase
 
         $this->assertSame([], $result);
         $this->assertTrue($succeeded);
+    }
+
+    // ------------------------------------------------------------------
+    // SET SESSION max_statement_time — bounds the wall-clock cost of any
+    // single query so a slow replica can't wedge the hourly cron behind
+    // one long-running statement (audits/STATUS.md P1.8).
+    //
+    // The default makeWikiStream helper disables this via
+    // db_statement_timeout_sec=0; these tests build their own SUT so
+    // they can observe the SET SESSION call.
+    // ------------------------------------------------------------------
+
+    public function test_constructor_sets_max_statement_time_on_tool_db(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $config->db_statement_timeout_sec = 30;
+
+        $db  = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+
+        $sqlCalls = [];
+        $tfc->expects($this->once())
+            ->method('getSQL')
+            ->willReturnCallback(function ($_db, string $sql) use (&$sqlCalls) {
+                $sqlCalls[] = $sql;
+                return $this->emptyResult();
+            });
+
+        new \WikiStream($config, $tfc);
+
+        $this->assertSame(['SET SESSION max_statement_time = 30'], $sqlCalls);
+    }
+
+    public function test_constructor_skips_set_session_when_timeout_disabled(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $config->db_statement_timeout_sec = 0;
+
+        $db  = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+
+        // Explicit: zero timeout must NOT issue any SQL during construction.
+        $tfc->expects($this->never())->method('getSQL');
+
+        new \WikiStream($config, $tfc);
+    }
+
+    public function test_constructor_logs_and_continues_when_set_session_throws(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $config->db_statement_timeout_sec = 30;
+
+        $db  = $this->makeFakeDb();
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($db);
+        $tfc->method('getSQL')->willReturnCallback(
+            function () { throw new \RuntimeException('max_statement_time not supported'); },
+        );
+
+        // Swallow the error_log output for this test.
+        $prev = ini_set('error_log', '/dev/null');
+        try {
+            // No exception should escape the constructor.
+            $ws = new \WikiStream($config, $tfc);
+            $this->assertInstanceOf(\WikiStream::class, $ws);
+        } finally {
+            if ($prev !== false) {
+                ini_set('error_log', $prev);
+            }
+        }
+    }
+
+    public function test_make_rc_unavailable_sets_max_statement_time_on_wikidata_db(): void
+    {
+        [$ws, $tfc, $db] = $this->makeWikiStream();
+
+        $dbwd = (object) ['id' => 'wikidatawiki'];
+        $tfc->method('openDBwiki')->with('wikidatawiki')->willReturn($dbwd);
+
+        $sqlByDb = []; // [ [$dbRef, $sql], ... ]
+        $tfc->method('getSQL')->willReturnCallback(
+            function ($whichDb, string $sql) use (&$sqlByDb, $db, $dbwd) {
+                $tag = ($whichDb === $dbwd) ? 'wd' : (($whichDb === $db) ? 'tool' : 'other');
+                $sqlByDb[] = [$tag, $sql];
+                // kv read (first call on tool DB) wants a result; everything
+                // else can be empty.
+                if (str_contains($sql, "FROM `kv` WHERE `key`='last_rc_check'")) {
+                    return $this->emptyResult();
+                }
+                if (str_starts_with($sql, 'SELECT `rc_title`')) {
+                    return $this->emptyResult();
+                }
+                return $this->emptyResult();
+            },
+        );
+
+        $ws->make_rc_unavailable();
+
+        // The first call to the wd handle must be the timeout SET, and it
+        // must use 120 seconds (recentchanges scans get a longer ceiling
+        // than the tool DB).
+        $firstWdCall = null;
+        foreach ($sqlByDb as [$tag, $sql]) {
+            if ($tag === 'wd') {
+                $firstWdCall = $sql;
+                break;
+            }
+        }
+        $this->assertSame('SET SESSION max_statement_time = 120', $firstWdCall);
     }
 }

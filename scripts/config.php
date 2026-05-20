@@ -49,6 +49,12 @@
 	# Empty = no scope check (only the SPARQL discovery filters apply).
 	public $scope_root_qs = [];
 
+	# Seconds to pass to `SET SESSION max_statement_time` on the tool DB
+	# right after `openDBtool` returns. Bounds the wall-clock cost of any
+	# single query so a slow replica can't wedge the hourly cron behind
+	# one long-running statement (audits/STATUS.md P1.8). 0 disables.
+	public int $db_statement_timeout_sec = 30;
+
 	/// Returns an instance of the appropriate config class, as per the config.js file in the tool root directory
 	function get_config_instance(): self
 	{

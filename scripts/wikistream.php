@@ -114,7 +114,30 @@ class WikiStream
 			$this->tfc = $tfc;
 		}
 		$this->db = $this->tfc->openDBtool($this->config->tool_db);
+		$this->applyDbStatementTimeout($this->db, (int) ($this->config->db_statement_timeout_sec ?? 30));
 		$this->httpClient = $httpClient ?? new CurlHttpClient();
+	}
+
+	/**
+	 * Bound the wall-clock cost of any single query on $db so a slow
+	 * replica can't wedge the hourly cron behind one long-running
+	 * statement. No-op when $sec <= 0 (tests).
+	 *
+	 * MariaDB-specific (`SET SESSION max_statement_time = N`, seconds).
+	 * Toolforge production is MariaDB; older MySQL would use
+	 * `MAX_EXECUTION_TIME(N)` as a query hint, which we don't support.
+	 */
+	protected function applyDbStatementTimeout($db, int $sec): void
+	{
+		if ($sec <= 0) {
+			return;
+		}
+		try {
+			$this->tfc->getSQL($db, "SET SESSION max_statement_time = {$sec}");
+		} catch (\Throwable $e) {
+			// Don't kill the cron if max_statement_time isn't supported.
+			error_log("applyDbStatementTimeout: failed to set timeout: " . $e->getMessage());
+		}
 	}
 
 	/**
@@ -1523,6 +1546,10 @@ class WikiStream
 		//    loaded every item.q + every person.q into PHP first and then
 		//    issued (count/1000) cross-DB queries with rc_title IN (...).
 		$dbwd = $this->tfc->openDBwiki("wikidatawiki");
+		// recentchanges scans can be heavier than tool-DB queries when the
+		// watermark is stale — use a longer ceiling than the tool DB so a
+		// caught-up watermark survives one slow run.
+		$this->applyDbStatementTimeout($dbwd, 120);
 		$last_rc_check_safe = $this->db->real_escape_string($last_rc_check);
 		$sql = "SELECT `rc_title`,`rc_timestamp` FROM `recentchanges` " .
 			"WHERE `rc_namespace`=0 AND `rc_timestamp`>'{$last_rc_check_safe}'";
