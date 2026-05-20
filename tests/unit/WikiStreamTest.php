@@ -3652,6 +3652,230 @@ final class WikiStreamTest extends TestCase
         }
     }
 
+    // ------------------------------------------------------------------
+    // update_item_no_files_search_results — batched IA lookups.
+    //
+    // STATUS.md P1.7 / resilience.md F4.2: the previous loop fired
+    // sequential IA HTTP calls with `sleep(2)` between every row, so
+    // 100 rows cost 5+ min best case and ~2.5 h under IA failure. The
+    // Commons half of the same method was already batched via
+    // getJsonBatch — so was the obvious template.
+    //
+    // These tests use a WikiStream subclass to inject a pre-populated
+    // WikidataItemList (the production code goes via
+    // loadWikidataItemList()).
+    // ------------------------------------------------------------------
+
+    /**
+     * Build a WikiStream where `loadWikidataItemList()` returns the
+     * supplied $wil (so tests don't need a real Wikidata API).
+     *
+     * @param array<string,\WikidataItem> $itemsByQ
+     */
+    private function makeIaWikiStream(array $itemsByQ, \HttpClientInterface $http, \ToolforgeCommon $tfc): \WikiStream
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $config->db_statement_timeout_sec = 0;
+        $wil = new \WikidataItemList();
+        foreach ($itemsByQ as $q => $item) {
+            $wil->setItem($q, $item);
+        }
+        return new class($config, $tfc, $http, $wil) extends \WikiStream {
+            private \WikidataItemList $injectedWil;
+            public function __construct($config, $tfc, $http, \WikidataItemList $wil)
+            {
+                parent::__construct($config, $tfc, $http);
+                $this->injectedWil = $wil;
+            }
+            protected function loadWikidataItemList(array $qs): \WikidataItemList
+            {
+                unset($qs);
+                return $this->injectedWil;
+            }
+        };
+    }
+
+    private function makeP345Item(string $q, string $imdbId): \WikidataItem
+    {
+        $j = new \stdClass();
+        $j->id = $q;
+        $item = new \WikidataItem($j);
+        // Anonymous-class WikidataItem from the stub uses getClaims to look
+        // up by prop. The stub returns []; override it just for this item.
+        return new class($j, $imdbId) extends \WikidataItem {
+            public function __construct(object $j, private string $imdbId) {
+                parent::__construct($j);
+            }
+            public function getClaims(string|int $prop): array {
+                if ((string) $prop !== 'P345') return [];
+                $claim = new \stdClass();
+                $claim->rank = 'normal';
+                $claim->mainsnak = new \stdClass();
+                $claim->mainsnak->datavalue = new \stdClass();
+                $claim->mainsnak->datavalue->value = $this->imdbId;
+                return [$claim];
+            }
+        };
+    }
+
+    public function test_update_item_no_files_search_results_fires_one_imdb_batch_then_writes_updates(): void
+    {
+        $row1 = (object) ['q' => 1, 'title' => 'Metropolis', 'year' => '1927'];
+        $row2 = (object) ['q' => 2, 'title' => 'Nosferatu',  'year' => '1922'];
+
+        $items = [
+            'Q1' => $this->makeP345Item('Q1', 'tt0017136'),
+            'Q2' => $this->makeP345Item('Q2', 'tt0013442'),
+        ];
+
+        $http = $this->createMock(\HttpClientInterface::class);
+        $http->method('getJsonBatch')
+            ->willReturnCallback(function (array $urls) {
+                // First (and ideally only) batch is the IMDb lookup. Both
+                // imdb URLs return one hit each — no title/year fallback
+                // should fire.
+                $out = [];
+                foreach ($urls as $k => $_url) {
+                    $hits = new \stdClass();
+                    $hits->fields = (object) ['identifier' => "ia-{$k}"];
+                    $out[$k] = (object) [
+                        'response' => (object) [
+                            'body' => (object) [
+                                'hits' => (object) [
+                                    'hits'  => [$hits],
+                                    'total' => 1,
+                                ],
+                            ],
+                        ],
+                    ];
+                }
+                return $out;
+            });
+        // No single getJson calls — entire IA path must go through the batch.
+        $http->expects($this->never())->method('getJson');
+
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($this->makeFakeDb());
+
+        $capturedSql = [];
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($_db, string $sql) use (&$capturedSql, $row1, $row2) {
+                $capturedSql[] = $sql;
+                if (str_contains($sql, 'item_no_files') && str_contains($sql, 'ia_results` IS NULL')) {
+                    return $this->makeResult([$row1, $row2]);
+                }
+                if (str_contains($sql, 'item_no_files') && str_contains($sql, 'commons_results` IS NULL')) {
+                    return $this->emptyResult();
+                }
+                return $this->emptyResult();
+            });
+
+        $ws = $this->makeIaWikiStream($items, $http, $tfc);
+
+        $ws->update_item_no_files_search_results();
+
+        // Expect one UPDATE per row with the correct ia_results=hit count.
+        $updates = array_values(array_filter(
+            $capturedSql,
+            fn(string $s) => str_starts_with($s, 'UPDATE `item_no_files`'),
+        ));
+        $this->assertCount(2, $updates);
+        $this->assertStringContainsString('SET `ia_results`=1', $updates[0]);
+        $this->assertStringContainsString('WHERE `q`=1', $updates[0]);
+        $this->assertStringContainsString('SET `ia_results`=1', $updates[1]);
+        $this->assertStringContainsString('WHERE `q`=2', $updates[1]);
+    }
+
+    public function test_update_item_no_files_search_results_falls_back_to_title_year_when_no_imdb(): void
+    {
+        // Q1 has IMDb id but IA returns 0 hits → fallback fires.
+        // Q2 has no IMDb id at all → fallback fires directly.
+        $row1 = (object) ['q' => 1, 'title' => 'Obscure Film', 'year' => '1930'];
+        $row2 = (object) ['q' => 2, 'title' => 'No IMDb Film', 'year' => '1925'];
+
+        // Q2 has no P345 — empty WikidataItem.
+        $j2 = new \stdClass(); $j2->id = 'Q2';
+        $items = [
+            'Q1' => $this->makeP345Item('Q1', 'tt-zero-hits'),
+            'Q2' => new \WikidataItem($j2),
+        ];
+
+        $http = $this->createMock(\HttpClientInterface::class);
+        $batchCalls = 0;
+        $http->method('getJsonBatch')
+            ->willReturnCallback(function (array $urls) use (&$batchCalls) {
+                $batchCalls++;
+                $out = [];
+                if ($batchCalls === 1) {
+                    // First batch is the IMDb lookup: 0 hits to force fallback.
+                    foreach ($urls as $k => $_url) {
+                        $out[$k] = (object) [
+                            'response' => (object) [
+                                'body' => (object) [
+                                    'hits' => (object) ['hits' => [], 'total' => 0],
+                                ],
+                            ],
+                        ];
+                    }
+                } else {
+                    // Second batch is the title/year fallback: report total
+                    // (count is what the production code persists).
+                    foreach ($urls as $k => $_url) {
+                        $out[$k] = (object) [
+                            'response' => (object) [
+                                'body' => (object) [
+                                    'hits' => (object) ['hits' => [], 'total' => 7],
+                                ],
+                            ],
+                        ];
+                    }
+                }
+                return $out;
+            });
+
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($this->makeFakeDb());
+
+        $capturedSql = [];
+        $tfc->method('getSQL')
+            ->willReturnCallback(function ($_db, string $sql) use (&$capturedSql, $row1, $row2) {
+                $capturedSql[] = $sql;
+                if (str_contains($sql, 'item_no_files') && str_contains($sql, 'ia_results` IS NULL')) {
+                    return $this->makeResult([$row1, $row2]);
+                }
+                return $this->emptyResult();
+            });
+
+        $ws = $this->makeIaWikiStream($items, $http, $tfc);
+        $ws->update_item_no_files_search_results();
+
+        $updates = array_values(array_filter(
+            $capturedSql,
+            fn(string $s) => str_starts_with($s, 'UPDATE `item_no_files`'),
+        ));
+        $this->assertSame(2, $batchCalls, 'Title/year fallback batch must fire when IMDb returns 0.');
+        $this->assertCount(2, $updates);
+        // Both rows fall back, both record total=7.
+        foreach ($updates as $sql) {
+            $this->assertStringContainsString('SET `ia_results`=7', $sql);
+        }
+    }
+
+    public function test_update_item_no_files_search_results_empty_table_does_no_http(): void
+    {
+        $http = $this->createMock(\HttpClientInterface::class);
+        $http->expects($this->never())->method('getJsonBatch');
+        $http->expects($this->never())->method('getJson');
+
+        $tfc = $this->createMock(\ToolforgeCommon::class);
+        $tfc->method('openDBtool')->willReturn($this->makeFakeDb());
+        $tfc->method('getSQL')->willReturn($this->emptyResult());
+
+        $ws = $this->makeIaWikiStream([], $http, $tfc);
+        $ws->update_item_no_files_search_results();
+        $this->addToAssertionCount(1);
+    }
+
     public function test_make_rc_unavailable_sets_max_statement_time_on_wikidata_db(): void
     {
         [$ws, $tfc, $db] = $this->makeWikiStream();

@@ -3407,72 +3407,90 @@ class WikiStream
 		return $this->httpClient->getJson($url);
 	}
 
-	private function search_internet_archive_via_imdb($q_numeric): array {
-		$ret = [];
-		$q = "Q{$q_numeric}";
-		$wil = new WikidataItemList();
-		$wil->loadItems([$q]);
-		$item = $wil->getItem($q);
-		if ( isset($item) ) {
-			foreach ($item->getClaims("P345") as $c) {
-				if ($c->rank == "deprecated") {
-					continue;
-				}
-				if (
-					!isset($c) or
-					!isset($c->mainsnak) or
-					!isset($c->mainsnak->datavalue)
-				) {
-					continue;
-				}
-				$imdb_id = $c->mainsnak->datavalue->value;
-				$query = "external-identifier:\"urn:imdb:{$imdb_id}\"";
-				$url =
-					"https://archive.org/services/search/beta/page_production/?service_backend=metadata&user_query=" .
-					urlencode($query) .
-					"&page_type=collection_details&page_target=movies&hits_per_page=50&page=0";
-				$j = $this->get_json_from_url($url);
-				foreach ( $j->response->body->hits->hits as $hit ) {
-					$ret[] = $hit->fields->identifier;
-				}
-			}
-		}
-		return $ret;
-	}
-
-	private function search_internet_archive_via_title_and_year($o): int {
-		$query = "\"{$o->title}\"";
-		if (isset($o->year)) {
-			$query .= " {$o->year}";
-		}
-		$url =
-			"https://archive.org/services/search/beta/page_production/?service_backend=metadata&user_query=" .
-			urlencode($query) .
-			"&page_type=collection_details&page_target=movies&hits_per_page=50&page=0";
-		$j = $this->get_json_from_url($url);
-		$hits = $j->response->body->hits->total * 1;
-		return $hits;
+	private static function iaSearchUrl(string $userQuery): string
+	{
+		return "https://archive.org/services/search/beta/page_production/?service_backend=metadata&user_query="
+			. urlencode($userQuery)
+			. "&page_type=collection_details&page_target=movies&hits_per_page=50&page=0";
 	}
 
 	public function update_item_no_files_search_results(): void
 	{
-		# Internet Archive
+		# Internet Archive — batched (previously a sequential loop with
+		# sleep(2) between rows; 100 rows cost 5+ min best case, ~2.5 h
+		# under IA failure). HttpClient::getJsonBatch handles retry,
+		# concurrency cap, and 429/408 backoff.
 		$sql = "SELECT * FROM `item_no_files` WHERE `ia_results` IS NULL LIMIT 100";
 		$result = $this->tfc->getSQL($this->db, $sql);
-		// Buffer rows first so we can free the result set before issuing
-		// per-row UPDATEs (each UPDATE goes through the same connection).
 		$iaRows = [];
 		while ($o = $result->fetch_object()) {
-			$iaRows[] = $o;
+			if (trim($o->title) === '') continue;
+			$iaRows[(int) $o->q] = $o;
 		}
 		$this->freeResult($result);
-		foreach ($iaRows as $o) {
-			if (trim($o->title) == '') continue;
-			$hits = count($this->search_internet_archive_via_imdb($o->q));
-			if ($hits == 0) $hits = $this->search_internet_archive_via_title_and_year($o);
-			$sql = "UPDATE `item_no_files` SET `ia_results`={$hits} WHERE `q`={$o->q}";
-			$this->tfc->getSQL($this->db, $sql);
-			sleep(2);
+
+		if (!empty($iaRows)) {
+			# Bulk-load Wikidata items so each P345 lookup doesn't hit
+			# the wbgetentities endpoint individually.
+			$qStrings = array_map(fn(int $q) => "Q{$q}", array_keys($iaRows));
+			$wil = $this->loadWikidataItemList($qStrings);
+
+			# Phase 1: IMDb-based IA lookup. Key is "<q>|<imdb_id>" so
+			# we can map responses back even when one row has multiple
+			# IMDb claims.
+			$imdbUrls = [];
+			foreach ($iaRows as $q => $_o) {
+				$item = $wil->getItem("Q{$q}");
+				if (!isset($item)) continue;
+				foreach ($item->getClaims("P345") as $c) {
+					if (($c->rank ?? "") === "deprecated") continue;
+					if (!isset($c->mainsnak->datavalue)) continue;
+					$imdbId = (string) $c->mainsnak->datavalue->value;
+					if ($imdbId === '') continue;
+					$imdbUrls["{$q}|{$imdbId}"] = self::iaSearchUrl(
+						"external-identifier:\"urn:imdb:{$imdbId}\""
+					);
+				}
+			}
+
+			$hitsByQ = array_fill_keys(array_keys($iaRows), 0);
+			if (!empty($imdbUrls)) {
+				$imdbResponses = $this->httpClient->getJsonBatch($imdbUrls);
+				foreach ($imdbResponses as $key => $j) {
+					[$qStr, ] = explode("|", (string) $key, 2);
+					$q = (int) $qStr;
+					$hits = $j?->response?->body?->hits?->hits ?? null;
+					if (is_array($hits)) {
+						$hitsByQ[$q] += count($hits);
+					}
+				}
+			}
+
+			# Phase 2: for rows with no IMDb hits, fall back to a
+			# title/year query against the same endpoint.
+			$titleYearUrls = [];
+			foreach ($iaRows as $q => $o) {
+				if ($hitsByQ[$q] > 0) continue;
+				$query = "\"{$o->title}\"";
+				if (isset($o->year)) {
+					$query .= " {$o->year}";
+				}
+				$titleYearUrls[$q] = self::iaSearchUrl($query);
+			}
+			if (!empty($titleYearUrls)) {
+				$titleYearResponses = $this->httpClient->getJsonBatch($titleYearUrls);
+				foreach ($titleYearResponses as $q => $j) {
+					$total = $j?->response?->body?->hits?->total ?? 0;
+					$hitsByQ[(int) $q] = (int) $total;
+				}
+			}
+
+			# Phase 3: persist.
+			foreach ($iaRows as $q => $_o) {
+				$hits = (int) $hitsByQ[$q];
+				$sql = "UPDATE `item_no_files` SET `ia_results`={$hits} WHERE `q`={$q}";
+				$this->tfc->getSQL($this->db, $sql);
+			}
 		}
 
 		# Commons — batched
