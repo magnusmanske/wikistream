@@ -80,8 +80,8 @@ class CurlHttpClient implements HttpClientInterface
 				return null;
 			}
 
-			// Server error → retry
-			if ($status >= 500 && $status < 600) {
+			// Server error or rate-limit/timeout → retry
+			if ($this->isTransientStatus($status)) {
 				if ($attempt < $this->maxAttempts) {
 					$this->sleepBetweenAttempts($attempt);
 					continue;
@@ -90,7 +90,7 @@ class CurlHttpClient implements HttpClientInterface
 				return null;
 			}
 
-			// 4xx → permanent, do not retry
+			// 4xx (other than 408/429) → permanent, do not retry
 			if ($status >= 400) {
 				error_log("HTTP {$status} for {$url}");
 				return null;
@@ -131,7 +131,7 @@ class CurlHttpClient implements HttpClientInterface
 						?? [false, 0, CURLE_COULDNT_CONNECT ?? 7, "no response"];
 
 					$attempts[$k]++;
-					$isTransient = ($errno !== 0) || ($status >= 500 && $status < 600);
+					$isTransient = ($errno !== 0) || $this->isTransientStatus($status);
 
 					if (!$isTransient) {
 						// Permanent result (2xx/3xx/4xx). Decode if 2xx/3xx.
@@ -179,11 +179,40 @@ class CurlHttpClient implements HttpClientInterface
 	 */
 	protected function sleepBetweenAttempts(int $completedAttempts): void
 	{
-		$idx = $completedAttempts - 1;
-		$us  = $this->backoffUs[$idx] ?? end($this->backoffUs);
+		$us = $this->computeBackoffUs($completedAttempts);
 		if ($us > 0) {
 			usleep($us);
 		}
+	}
+
+	/**
+	 * Pick a backoff in microseconds for the wait *before* attempt
+	 * ($completedAttempts + 1). Adds up to +30% jitter on top of the
+	 * configured base so parallel cron tasks don't reconnect in lockstep
+	 * after a shared upstream blip. Returns 0 when the configured base is 0
+	 * (tests).
+	 */
+	protected function computeBackoffUs(int $completedAttempts): int
+	{
+		$idx  = $completedAttempts - 1;
+		$base = $this->backoffUs[$idx] ?? end($this->backoffUs);
+		if ($base <= 0) {
+			return 0;
+		}
+		$jitter = random_int(0, (int) ($base * 0.3));
+		return $base + $jitter;
+	}
+
+	/**
+	 * True for HTTP statuses that should be retried: any 5xx, 429 (Too Many
+	 * Requests), and 408 (Request Timeout). Other 4xx are treated as
+	 * permanent.
+	 */
+	protected function isTransientStatus(int $status): bool
+	{
+		return ($status >= 500 && $status < 600)
+			|| $status === 429
+			|| $status === 408;
 	}
 
 	/**
