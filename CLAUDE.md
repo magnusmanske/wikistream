@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Do not add the Claude attribution to commit messages.** No `Co-Authored-By: Claude …` line.
 - **`git commit` is pre-authorized; `git push` is not.** When work is complete and the diff is reviewable, you may run `git add <specific files>` + `git commit` without asking — this is durable authorization. **Never `git push`, `git push --force`, or otherwise publish commits to a remote without an explicit per-action request from the user.** Same for any other remote-publishing action (PR creation, branch deletion on origin, etc.). Use sensible commit groupings for larger changes.
-- **`audits/`, `CLAUDE.md`, and `.claude/` are all gitignored.** Don't try to git-add them; treat audit files as durable scratch.
+- **`audits/` and `.claude/` are gitignored**; treat audit files as durable scratch. **`CLAUDE.md` is tracked** — edit it deliberately and commit changes alongside the work that motivated them.
 - **Never alter the production database**, no additions, alterations, deletions, unless specifically told to.
 - **Never write/alter/add/delete files in `public_html/resources` or `public_html/php`** — these are synced from the Magnus-tools shared library. wikistream-specific Vue/ES6 code lives under `public_html/vue_components/` (Composition API ES modules) and imports from the shared library by relative path.
 - **Keep mobile in mind.** — mobile-first design, responsive layouts, and touch-friendly interactions.
