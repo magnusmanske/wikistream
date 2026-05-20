@@ -3560,9 +3560,12 @@ class WikiStream
 
 	public function set_user_list_state($user_id, $q, $state): void
 	{
-		$user_id *= 1;
-		$q *= 1;
-		$state *= 1;
+		// (int) rather than *=1 — same coercion (leading digits) but
+		// silent on non-numeric input under PHP 8.x. Matches the
+		// pattern used in ensure_user_exists().
+		$user_id = (int) $user_id;
+		$q       = (int) $q;
+		$state   = (int) $state;
 		if ($state == 0) {
 			$sql = "DELETE FROM `user_item_list` WHERE `user_id`={$user_id} AND `q`={$q}";
 		} else {
@@ -3589,8 +3592,8 @@ class WikiStream
 
 	public function is_user_watching_item($user_id, $q): bool
 	{
-		$user_id *= 1;
-		$q *= 1;
+		$user_id = (int) $user_id;
+		$q       = (int) $q;
 		$sql = "SELECT `id` FROM `user_item_list` WHERE `user_id`={$user_id} AND `q`={$q}";
 		$result = $this->tfc->getSQL($this->db, $sql);
 		$found = false;

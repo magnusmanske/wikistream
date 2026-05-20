@@ -3876,6 +3876,101 @@ final class WikiStreamTest extends TestCase
         $this->addToAssertionCount(1);
     }
 
+    // ------------------------------------------------------------------
+    // set_user_list_state — the only user-mutating endpoint, fronted by
+    // Widar OAuth. The only defence against a malicious `q` or `state`
+    // that bypasses the JS client is the `*1` numeric cast, so each
+    // branch and each input position needs explicit coverage
+    // (audits/STATUS.md P1.11, testing.md T2).
+    // ------------------------------------------------------------------
+
+    public function test_set_user_list_state_zero_emits_delete(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = null;
+        $tfc->expects($this->once())->method('getSQL')
+            ->willReturnCallback(function ($_db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->set_user_list_state(42, 7, 0);
+
+        $this->assertStringStartsWith('DELETE FROM `user_item_list`', $captured);
+        $this->assertStringContainsString('`user_id`=42', $captured);
+        $this->assertStringContainsString('`q`=7', $captured);
+    }
+
+    public function test_set_user_list_state_nonzero_emits_insert_ignore(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = null;
+        $tfc->expects($this->once())->method('getSQL')
+            ->willReturnCallback(function ($_db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->set_user_list_state(42, 7, 1);
+
+        $this->assertStringStartsWith('INSERT IGNORE INTO `user_item_list`', $captured);
+        $this->assertStringContainsString('(42,7)', $captured);
+    }
+
+    public function test_set_user_list_state_coerces_injection_in_q_to_integer(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = null;
+        $tfc->expects($this->once())->method('getSQL')
+            ->willReturnCallback(function ($_db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        // PHP "$str * 1" coerces leading digits then stops. The cast is
+        // the only sanitisation barrier in front of this raw-SQL writer,
+        // so an injection attempt must collapse to a plain integer.
+        $ws->set_user_list_state(42, '7; DROP TABLE `user_item_list`; --', 1);
+
+        $this->assertStringNotContainsString('DROP', $captured);
+        $this->assertStringNotContainsString(';', $captured);
+        $this->assertStringContainsString('(42,7)', $captured);
+    }
+
+    public function test_set_user_list_state_coerces_injection_in_user_id_to_integer(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = null;
+        $tfc->expects($this->once())->method('getSQL')
+            ->willReturnCallback(function ($_db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->set_user_list_state('42 OR 1=1', 7, 0);
+
+        $this->assertStringNotContainsString('OR', $captured);
+        $this->assertStringContainsString('`user_id`=42', $captured);
+    }
+
+    public function test_set_user_list_state_string_state_routes_via_numeric_cast(): void
+    {
+        // The Widar dispatcher passes $_REQUEST values through *1; this
+        // test makes sure the same coercion at the WikiStream level
+        // sends a stringy "1" through the INSERT branch (not DELETE).
+        [$ws, $tfc] = $this->makeWikiStream();
+        $captured = null;
+        $tfc->expects($this->once())->method('getSQL')
+            ->willReturnCallback(function ($_db, string $sql) use (&$captured) {
+                $captured = $sql;
+                return $this->emptyResult();
+            });
+
+        $ws->set_user_list_state(42, 7, '1');
+
+        $this->assertStringStartsWith('INSERT IGNORE', $captured);
+    }
+
     public function test_make_rc_unavailable_sets_max_statement_time_on_wikidata_db(): void
     {
         [$ws, $tfc, $db] = $this->makeWikiStream();
