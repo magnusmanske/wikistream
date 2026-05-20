@@ -49,6 +49,26 @@ if (!class_exists('WikidataItem')) {
     }
 }
 
+if (!class_exists('Widar')) {
+    /**
+     * Minimal stub for the vendored OAuth wrapper. Real Widar lives at
+     * public_html/php/Widar.php (out of scope per CLAUDE.md). Tests
+     * either use this default (anonymous: user_id=0, username='') or
+     * substitute a per-test mock that overrides get_user_id /
+     * get_username.
+     */
+    class Widar
+    {
+        public string $authorization_callback = '';
+        public mixed $tfc = null;
+        public function __construct(string $tool = '') {}
+        public function attempt_verification_auto_forward(string $url): void {}
+        public function render_reponse(bool $silent = false): bool { return false; }
+        public function get_user_id(): int { return 0; }
+        public function get_username(): string { return ''; }
+    }
+}
+
 if (!class_exists('WikidataItemList')) {
     class WikidataItemList
     {
@@ -109,3 +129,4 @@ set_include_path(get_include_path() . PATH_SEPARATOR . __DIR__);
 })();
 
 require_once __DIR__ . '/../scripts/wikistream.php';
+require_once __DIR__ . '/../scripts/ApiDispatcher.php';
