@@ -3384,4 +3384,87 @@ final class WikiStreamTest extends TestCase
         $this->assertCount(1, $sqlCalls, 'No follow-up SQL allowed after empty SPARQL result.');
         $this->assertStringContainsString('DISTINCT `primary_type_q`', $sqlCalls[0]);
     }
+
+    // ------------------------------------------------------------------
+    // atomicWriteFile() writes the target path with the expected
+    // contents and leaves no `.tmp` file behind.
+    //
+    // The motivation is in audits/STATUS.md P0.2: a mid-write crash
+    // during generate_main_page_data() can otherwise leave a truncated
+    // `public_html/config.js`, which then breaks the entire SPA at the
+    // next page load.
+    // ------------------------------------------------------------------
+
+    public function test_atomicWriteFile_writes_contents_and_cleans_up_tmp(): void
+    {
+        [$ws] = $this->makeWikiStream();
+
+        $dir  = sys_get_temp_dir() . '/wikistream-atomic-' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        $path = $dir . '/target.txt';
+
+        try {
+            $method = new ReflectionMethod(\WikiStream::class, 'atomicWriteFile');
+            $method->invoke($ws, $path, 'hello world');
+
+            $this->assertFileExists($path);
+            $this->assertSame('hello world', file_get_contents($path));
+            $this->assertFileDoesNotExist($path . '.tmp');
+        } finally {
+            @unlink($path);
+            @unlink($path . '.tmp');
+            @rmdir($dir);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // atomicWriteFile() overwrites an existing target atomically — the
+    // old contents stay readable until rename() flips the pointer, so
+    // a concurrent reader either sees the old payload or the new one,
+    // never a half-written file.
+    // ------------------------------------------------------------------
+
+    public function test_atomicWriteFile_overwrites_existing_target(): void
+    {
+        [$ws] = $this->makeWikiStream();
+
+        $dir  = sys_get_temp_dir() . '/wikistream-atomic-' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        $path = $dir . '/target.txt';
+        file_put_contents($path, 'old contents');
+
+        try {
+            $method = new ReflectionMethod(\WikiStream::class, 'atomicWriteFile');
+            $method->invoke($ws, $path, 'new contents');
+
+            $this->assertSame('new contents', file_get_contents($path));
+            $this->assertFileDoesNotExist($path . '.tmp');
+        } finally {
+            @unlink($path);
+            @unlink($path . '.tmp');
+            @rmdir($dir);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // atomicWriteFile() throws when the destination directory does not
+    // exist, and does NOT leave a stray `.tmp` behind in that case.
+    // ------------------------------------------------------------------
+
+    public function test_atomicWriteFile_throws_on_unwritable_target(): void
+    {
+        [$ws] = $this->makeWikiStream();
+
+        $path = sys_get_temp_dir() . '/wikistream-atomic-nonexistent-dir-'
+              . bin2hex(random_bytes(4)) . '/target.txt';
+
+        $method = new ReflectionMethod(\WikiStream::class, 'atomicWriteFile');
+
+        $this->expectException(\RuntimeException::class);
+        try {
+            $method->invoke($ws, $path, 'payload');
+        } finally {
+            $this->assertFileDoesNotExist($path . '.tmp');
+        }
+    }
 }

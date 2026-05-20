@@ -2370,12 +2370,36 @@ class WikiStream
 		}
 	}
 
+	/**
+	 * Write a file atomically: write to <path>.tmp first, then rename().
+	 * rename() is atomic on POSIX when source and destination are on the same
+	 * filesystem (always true here — both sit in the same directory).
+	 *
+	 * This matters for `config.js` and `all.json`: the SPA loads `config.js`
+	 * as a classic <script>, so a truncated file (SIGTERM mid-write, OOM kill,
+	 * disk pressure) breaks the entire frontend until the next cron succeeds.
+	 * Atomic rename keeps the old payload readable until the new one is fully
+	 * on disk.
+	 */
+	protected function atomicWriteFile(string $path, string $contents): void
+	{
+		$tmp = $path . '.tmp';
+		$bytes = @file_put_contents($tmp, $contents);
+		if ($bytes === false) {
+			throw new \RuntimeException("atomicWriteFile: failed to write {$tmp}");
+		}
+		if (!@rename($tmp, $path)) {
+			@unlink($tmp);
+			throw new \RuntimeException("atomicWriteFile: failed to rename {$tmp} -> {$path}");
+		}
+	}
+
 	public function generate_all_data(): void
 	{
 		$data = $this->get_main_page_data(PHP_INT_MAX, PHP_INT_MAX);
 		$data = json_encode($data);
 		$filename = __DIR__ . "/../public_html/all.json";
-		file_put_contents($filename, $data);
+		$this->atomicWriteFile($filename, $data);
 	}
 
 	public function generate_main_page_data(): void
@@ -2383,7 +2407,7 @@ class WikiStream
 		$out = $this->get_main_page_data();
 		$out = "var config = " . json_encode($out) . ";";
 		$filename = __DIR__ . "/../public_html/config.js";
-		file_put_contents($filename, $out);
+		$this->atomicWriteFile($filename, $out);
 
 		$sql =
 			"SELECT (select count(q) from item) as items,(select count(id) FROM `file`) AS files,(select count(q) from person) as people";
