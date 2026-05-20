@@ -676,7 +676,7 @@ class WikiStream
 					VALUES ?root { {$roots} }
 					?q wdt:P31/wdt:P279* ?root .
 				}";
-			foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+			foreach ($this->sparqlRetried($sparql) as $row) {
 				$q = $this->tfc->parseItemFromURL((string) (is_array($row) ? ($row["q"] ?? "") : ($row->q ?? "")));
 				$num = (int) preg_replace("|\D|", "", (string) $q);
 				if ($num > 0 && isset($qs[$num])) {
@@ -856,7 +856,7 @@ class WikiStream
 			}";
 
 		$accepted = [];
-		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+		foreach ($this->sparqlRetried($sparql) as $row) {
 			$raw = is_array($row) ? ($row["t"] ?? "") : ($row->t ?? "");
 			$q = $this->tfc->parseItemFromURL((string) $raw);
 			$num = (int) preg_replace("|\D|", "", (string) $q);
@@ -983,7 +983,8 @@ class WikiStream
 			}
 
 			$found = 0;
-			foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+			$succeeded = false;
+			foreach ($this->sparqlRetried($sparql, $succeeded) as $row) {
 				$row = (object) $row;
 				$q = $this->tfc->parseItemFromURL($row->q);
 				if (isset($existing_qs[$q])) {
@@ -999,7 +1000,13 @@ class WikiStream
 				$new_qs[] = $q_numeric;
 				$found += 1;
 			}
-			// print "SPARQL #{$sparql_id} found {$found} items\n";
+			if (!$succeeded) {
+				// Distinguishes "WDQS hiccup, retried three times, gave up"
+				// from "query ran and returned no new items" — both look
+				// identical in `found`/`new_qs` but only the first should
+				// alarm a cron operator.
+				error_log("update_from_sparql: SPARQL #{$sparql_id} exhausted retries; skipping this query");
+			}
 		}
 
 		if (count($new_qs) == 0) {
@@ -2371,6 +2378,64 @@ class WikiStream
 	}
 
 	/**
+	 * Microseconds to wait between SPARQL retry attempts (multiplied by the
+	 * completed attempt number for a simple linear backoff). Tests set this
+	 * to 0 via reflection to disable real sleeps.
+	 */
+	protected int $sparqlRetryBaseSleepUs = 2_000_000;
+
+	/**
+	 * Run a SPARQL query through ToolforgeCommon with a small retry on
+	 * transient failures (WDQS read timeouts, 5xx, etc.). Returns an array
+	 * of rows. On persistent failure: returns [] and sets $succeeded to
+	 * false (so callers can distinguish a real "no rows" from "WDQS gave
+	 * up three times"). On success: $succeeded is true.
+	 *
+	 * The cron survives a WDQS hiccup this way — the next hour's run gets
+	 * another shot. Without this helper, every `getSPARQL_TSV` site was a
+	 * one-shot that silently underpopulated the DB on transient failure
+	 * (audits/STATUS.md P1.6).
+	 *
+	 * @return list<mixed>
+	 */
+	protected function sparqlRetried(
+		string $sparql,
+		?bool &$succeeded = null,
+		int $maxAttempts = 3,
+	): array {
+		$succeeded = false;
+		$lastErr   = null;
+		for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+			try {
+				$out = [];
+				foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+					$out[] = $row;
+				}
+				$succeeded = true;
+				return $out;
+			} catch (\Throwable $e) {
+				$lastErr = $e;
+				if ($attempt < $maxAttempts) {
+					$this->sparqlBackoffSleep($attempt);
+				}
+			}
+		}
+		$msg = $lastErr !== null ? $lastErr->getMessage() : 'unknown error';
+		error_log("sparqlRetried: gave up after {$maxAttempts} attempts: {$msg}");
+		return [];
+	}
+
+	protected function sparqlBackoffSleep(int $completedAttempts): void
+	{
+		if ($this->sparqlRetryBaseSleepUs <= 0) {
+			return;
+		}
+		$us = $this->sparqlRetryBaseSleepUs * $completedAttempts
+		    + random_int(0, 500_000);
+		usleep($us);
+	}
+
+	/**
 	 * Write a file atomically: write to <path>.tmp first, then rename().
 	 * rename() is atomic on POSIX when source and destination are on the same
 	 * filesystem (always true here — both sit in the same directory).
@@ -2608,7 +2673,7 @@ class WikiStream
 		// q (int) → ia identifier (string). Cap candidate count before
 		// HTTP fan-out to bound load on the IA metadata API.
 		$candidates = [];
-		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+		foreach ($this->sparqlRetried($sparql) as $row) {
 			if (count($candidates) >= self::IA_CURATED_CANDIDATES_PER_RUN) {
 				break;
 			}
@@ -2715,7 +2780,7 @@ class WikiStream
 			}";
 
 		$candidate_qs = [];
-		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+		foreach ($this->sparqlRetried($sparql) as $row) {
 			$q = $this->tfc->parseItemFromURL((string) ($row["q"] ?? ""));
 			$q_numeric = (int) preg_replace("|\D|", "", (string) $q);
 			if ($q_numeric > 0) {
@@ -2927,7 +2992,7 @@ class WikiStream
 			}";
 
 		$commands = [];
-		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+		foreach ($this->sparqlRetried($sparql) as $row) {
 			$q = $this->tfc->parseItemFromURL((string) ($row["q"] ?? ""));
 			$q_numeric = (int) preg_replace("|\D|", "", (string) $q);
 			$imdb = (string) ($row["imdb"] ?? "");
@@ -3044,7 +3109,7 @@ class WikiStream
 			}";
 
 		$verifiedFilms = [];
-		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+		foreach ($this->sparqlRetried($sparql) as $row) {
 			$q = $this->tfc->parseItemFromURL((string) ($row["q"] ?? ""));
 			if ($q !== "") {
 				$verifiedFilms[$q] = true;
@@ -3095,7 +3160,7 @@ class WikiStream
 			}";
 
 		$commands = [];
-		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+		foreach ($this->sparqlRetried($sparql) as $row) {
 			if (count($commands) >= self::PRE_1900_PD_PER_RUN) {
 				break;
 			}
@@ -3153,7 +3218,7 @@ class WikiStream
 			MINUS { ?statement pq:P2047 ?duration }
 		}"; # LIMIT 1000
 		$q2ia = [];
-		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+		foreach ($this->sparqlRetried($sparql) as $row) {
 			$q = $this->tfc->parseItemFromURL($row["q"]);
 			$ia = $row["ia"];
 			$q2ia[$q] = $ia;
@@ -3276,7 +3341,7 @@ class WikiStream
 					SERVICE wikibase:label { bd:serviceParam wikibase:language \"[AUTO_LANGUAGE],en,fr,it,de,mul\". }
 		}";
 		$to_insert = [];
-		foreach ($this->tfc->getSPARQL_TSV($sparql) as $row) {
+		foreach ($this->sparqlRetried($sparql) as $row) {
 			$row = (object) $row;
 			$q = $this->tfc->parseItemFromURL($row->q);
 			if (isset($existing_qs[$q])) {

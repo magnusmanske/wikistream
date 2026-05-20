@@ -3467,4 +3467,107 @@ final class WikiStreamTest extends TestCase
             $this->assertFileDoesNotExist($path . '.tmp');
         }
     }
+
+    // ------------------------------------------------------------------
+    // sparqlRetried() — keeps the cron alive when WDQS hiccups.
+    //
+    // STATUS.md P1.6 / resilience.md F2.3: a single WDQS timeout used
+    // to silently produce zero rows, which was indistinguishable from
+    // "no new items today" in the logs. The helper retries on
+    // exceptions and exposes a succeeded flag so callers can tell the
+    // difference.
+    // ------------------------------------------------------------------
+
+    /**
+     * Disable real usleep() between SPARQL retry attempts so the test
+     * doesn't actually sleep multiple seconds.
+     */
+    private function disableSparqlRetrySleep(\WikiStream $ws): void
+    {
+        $prop = new ReflectionProperty(\WikiStream::class, 'sparqlRetryBaseSleepUs');
+        $prop->setValue($ws, 0);
+    }
+
+    public function test_sparqlRetried_returns_rows_on_first_success(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $tfc->expects($this->once())->method('getSPARQL_TSV')
+            ->willReturn([['q' => 'Q1'], ['q' => 'Q2']]);
+
+        $m = new ReflectionMethod(\WikiStream::class, 'sparqlRetried');
+        $succeeded = null;
+        $result = $m->invokeArgs($ws, ['SELECT ?q WHERE {}', &$succeeded]);
+
+        $this->assertCount(2, $result);
+        $this->assertTrue($succeeded);
+    }
+
+    public function test_sparqlRetried_retries_on_exception_then_succeeds(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $this->disableSparqlRetrySleep($ws);
+
+        $callCount = 0;
+        $tfc->method('getSPARQL_TSV')->willReturnCallback(
+            function () use (&$callCount) {
+                $callCount++;
+                if ($callCount === 1) {
+                    throw new \RuntimeException('WDQS read timeout');
+                }
+                return [['q' => 'Q42']];
+            },
+        );
+
+        $m = new ReflectionMethod(\WikiStream::class, 'sparqlRetried');
+        $succeeded = null;
+        $result = $m->invokeArgs($ws, ['SELECT ?q WHERE {}', &$succeeded]);
+
+        $this->assertCount(1, $result);
+        $this->assertSame(2, $callCount);
+        $this->assertTrue($succeeded);
+    }
+
+    public function test_sparqlRetried_returns_empty_and_false_after_all_attempts_fail(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+        $this->disableSparqlRetrySleep($ws);
+
+        $tfc->method('getSPARQL_TSV')->willReturnCallback(
+            function () { throw new \RuntimeException('persistent WDQS failure'); },
+        );
+
+        // The helper writes to the PHP error log on exhaustion. Redirect
+        // it so the test output stays clean.
+        $prev = ini_set('error_log', '/dev/null');
+        try {
+            $m = new ReflectionMethod(\WikiStream::class, 'sparqlRetried');
+            $succeeded = null;
+            $result = $m->invokeArgs($ws, ['SELECT ?q WHERE {}', &$succeeded]);
+        } finally {
+            if ($prev !== false) {
+                ini_set('error_log', $prev);
+            }
+        }
+
+        $this->assertSame([], $result);
+        $this->assertFalse($succeeded);
+    }
+
+    public function test_sparqlRetried_does_not_retry_on_success(): void
+    {
+        [$ws, $tfc] = $this->makeWikiStream();
+
+        // expects(once) makes the test fail if the helper retries
+        // unnecessarily — the audit-recommended behaviour is "retry on
+        // exception", not "retry on empty".
+        $tfc->expects($this->once())->method('getSPARQL_TSV')
+            ->willReturn([]);
+
+        $m = new ReflectionMethod(\WikiStream::class, 'sparqlRetried');
+        $succeeded = null;
+        $result = $m->invokeArgs($ws, ['SELECT ?q WHERE {}', &$succeeded]);
+
+        $this->assertSame([], $result);
+        $this->assertTrue($succeeded);
+    }
 }
