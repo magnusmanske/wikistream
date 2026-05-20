@@ -45,6 +45,18 @@ export default {
             return types.includes(type_q);
         });
 
+        // Single "best" file for the hover-play overlay. Prefer the first
+        // non-trailer; within those, prefer Commons P10 (native <video>,
+        // no third-party iframe). Items with only trailers, or no files,
+        // get no overlay — those users go via the entry page.
+        const play_file = computed(() => {
+            const files = (props.entry && props.entry.files) || [];
+            const playable = files.filter((f) => f && !Number(f.is_trailer));
+            if (playable.length === 0) return null;
+            const commons = playable.find((f) => Number(f.property) === 10);
+            return commons || playable[0];
+        });
+
         function onHeartClick() {
             if (props.entry && props.entry.q) toggleFavorite(props.entry.q);
         }
@@ -55,7 +67,7 @@ export default {
             prefetchStart(`./api.php?action=get_entry&q=${encodeURIComponent(q)}`);
         }
 
-        return { logged_in, is_fav, is_episode, onHeartClick, onHoverStart, prefetchCancel };
+        return { logged_in, is_fav, is_episode, play_file, onHeartClick, onHoverStart, prefetchCancel };
     },
     methods: {
         missing_icon() {
@@ -71,6 +83,11 @@ export default {
         onRemoveClick() {
             if (this.entry && this.entry.q) this.$emit('remove', this.entry.q);
         },
+        onPlayClick() {
+            const f = this.play_file;
+            if (!f) return;
+            this.$router.push(`/play/${f.property}/${encodeURIComponent(f.key)}`);
+        },
     },
     template: `
         <div class="entry-container" @mouseenter="onHoverStart" @mouseleave="prefetchCancel">
@@ -80,6 +97,16 @@ export default {
                     <commons-thumbnail v-else-if="first_commons_video()!=''" loading="lazy" :filename="first_commons_video()" videothumbnail="1" width="200" nolink="1"></commons-thumbnail>
                     <commons-thumbnail v-else :filename="missing_icon()" loading="lazy" width="200" nolink="1"></commons-thumbnail>
                 </router-link>
+                <button
+                    v-if="play_file"
+                    type="button"
+                    class="entry-thumb-play"
+                    @click.stop.prevent="onPlayClick"
+                    tt_title="play"
+                    aria-label="Play"
+                >
+                    <i class="bi bi-play-fill"></i>
+                </button>
                 <button
                     v-if="logged_in"
                     type="button"

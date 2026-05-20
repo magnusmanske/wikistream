@@ -90,6 +90,45 @@ div.page-header:hover .page-header-movies-total {
 .entry-thumb-fav.is-favorite {
     color: #ff4d6d;
 }
+.entry-thumb-play {
+    position: absolute;
+    /* The link area is locked to 200×150 (4/3 of 200px), so its centre
+       sits at 75px from the top. Centring against the whole container
+       would drift downward into the legend area. */
+    top: 75px;
+    left: 100px;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    width: 3.5rem;
+    height: 3.5rem;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .2s, background .2s, transform .2s;
+}
+.entry-container .thumbnail-container:hover .entry-thumb-play,
+.entry-container .thumbnail-container:focus-within .entry-thumb-play {
+    opacity: 1;
+}
+.entry-thumb-play:hover {
+    background: rgba(0, 0, 0, 0.85);
+    transform: translate(-50%, -50%) scale(1.08);
+}
+/* Touch devices have no hover, and a centred always-visible play icon
+   would clutter the grid and fight the tap-thumbnail-to-open-entry
+   gesture. Keep this overlay desktop-only — mobile users get the big
+   Play button on the entry page. */
+@media (hover: none) {
+    .entry-thumb-play { display: none; }
+}
 .entry-thumb-type-badge {
     position: absolute;
     top: 0.5rem;
