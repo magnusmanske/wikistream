@@ -130,3 +130,4 @@ set_include_path(get_include_path() . PATH_SEPARATOR . __DIR__);
 
 require_once __DIR__ . '/../scripts/wikistream.php';
 require_once __DIR__ . '/../scripts/ApiDispatcher.php';
+require_once __DIR__ . '/../scripts/Watchdog.php';

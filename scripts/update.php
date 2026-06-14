@@ -6,6 +6,14 @@ ini_set('display_errors', 'On');
 ini_set('memory_limit','1500M');
 
 require_once ( __DIR__.'/wikistream.php' ) ;
+require_once ( __DIR__.'/Watchdog.php' ) ;
+
+// Force-terminate a wedged run. Shared-library fetchers (public_html/php) set
+// no curl timeout — a silently-stalled WDQS/Wikidata socket blocks forever,
+// which is the "stuck for weeks" failure. We can't patch the shared lib here,
+// so a forked watchdog SIGKILLs this process after a wall-clock deadline.
+// Tune/disable via WIKISTREAM_UPDATE_TIMEOUT (seconds; 0 disables).
+Watchdog::arm(Watchdog::resolveTimeout(getenv('WIKISTREAM_UPDATE_TIMEOUT')));
 
 $config = (new WikiStreamConfig)->get_config_instance();
 $ws = new WikiStream($config);
