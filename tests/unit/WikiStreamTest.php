@@ -2211,9 +2211,11 @@ final class WikiStreamTest extends TestCase
 
         $this->assertCount(2, $ws->capturedCommands);
         $joined = implode("\n", $ws->capturedCommands);
-        // Each line is: "Q<id>\tP6216\tQ19652\tP459\tQ47246828\t/* comment */"
-        $this->assertStringContainsString("Q1001\tP6216\tQ19652\tP459\tQ47246828", $joined);
-        $this->assertStringContainsString("Q1002\tP6216\tQ19652\tP459\tQ47246828", $joined);
+        // Each line is: "Q<id>\tP6216\tQ19652\tP459\tQ47246828\tP1001\tQ30\t/* comment */"
+        // The P459=Q47246828 determination method (US 95-year rule) must
+        // always be paired with P1001=Q30 (applies to jurisdiction: US).
+        $this->assertStringContainsString("Q1001\tP6216\tQ19652\tP459\tQ47246828\tP1001\tQ30", $joined);
+        $this->assertStringContainsString("Q1002\tP6216\tQ19652\tP459\tQ47246828\tP1001\tQ30", $joined);
     }
 
     /**

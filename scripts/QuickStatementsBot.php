@@ -657,6 +657,9 @@ class QuickStatementsBot
 	 * to a plausible age. P459=Q47246828 ("published more than 95 years
 	 * ago") is added as the determination-method qualifier, matching the
 	 * Wikidata convention used on 32,954 existing film P6216 statements.
+	 * That determination method is jurisdiction-specific (US 95-year
+	 * rule), so it always carries P1001=Q30 ("applies to jurisdiction:
+	 * United States") alongside it.
 	 *
 	 * Bounded by self::PRE_1900_PD_PER_RUN. The current candidate pool
 	 * is ~86 films, so a single run usually clears it.
@@ -682,7 +685,7 @@ class QuickStatementsBot
 			if ($q_numeric <= 0) {
 				continue;
 			}
-			$commands[] = "Q{$q_numeric}\tP6216\tQ19652\tP459\tQ47246828\t/* WikiFlix C1: pre-1900 film, PD by age */";
+			$commands[] = "Q{$q_numeric}\tP6216\tQ19652\tP459\tQ47246828\tP1001\tQ30\t/* WikiFlix C1: pre-1900 film, PD by age */";
 		}
 
 		$this->pushQuickStatements($commands);
