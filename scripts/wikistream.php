@@ -33,6 +33,16 @@ class WikiStream implements ItemViewReader
 	private const WD_DO_NOT_USE         = "Q124428688"; // P11484 qualifier: do not use for WikiFlix
 	private const WD_UNIT_MINUTE        = "http://www.wikidata.org/entity/Q7727";
 
+	// purge_deleted_commons_files() tunables.
+	/** File names per `IN (...)` lookup against the commonswiki replica. */
+	private const COMMONS_EXISTS_CHUNK = 500;
+	/** File names per DELETE/UPDATE against the tool DB. */
+	private const COMMONS_PURGE_CHUNK = 500;
+	/** Abort the purge above this fraction of names looking deleted, … */
+	private const COMMONS_MISSING_MAX_FRACTION = 0.05;
+	/** … but never below this absolute count (small DBs, real backlogs). */
+	private const COMMONS_MISSING_MIN_ABSOLUTE = 50;
+
 	// Bot-only tunables (PRE_1900_PD_PER_RUN, IA_*, P953_*, C2_*, C3_*)
 	// moved to QuickStatementsBot. The remaining constants below are
 	// still referenced by the ingest path on WikiStream itself.
@@ -939,6 +949,207 @@ class WikiStream implements ItemViewReader
 				}
 			}
 		}
+	}
+
+	/**
+	 * Drop references to Commons files that no longer exist.
+	 *
+	 * A Commons deletion does not touch the Wikidata item, so the P10/P51
+	 * statement survives and nothing in the SPARQL/claim ingest path
+	 * notices — the entry stays listed and 404s on playback.
+	 *
+	 * Existence is checked against the commonswiki replica rather than the
+	 * Commons API: one indexed `IN (...)` lookup per chunk beats tens of
+	 * thousands of HTTP round-trips. A name counts as alive when a ns-6
+	 * page exists for it, which also covers file moves — the redirect page
+	 * remains, and the player resolves it through Special:FilePath. The
+	 * `page` table is used rather than `image` because it survives the
+	 * MediaWiki file-schema migration, and because it errs towards
+	 * *keeping* entries.
+	 *
+	 * Covers playable media (`file`) and the poster/portrait columns on
+	 * `item`, `person` and `group`. Items left without any playable file
+	 * are removed by purge_items_without_files(), which runs later in the
+	 * default pipeline.
+	 */
+	public function purge_deleted_commons_files(): void
+	{
+		$rawsByTitle = $this->collect_commons_file_names();
+		if (empty($rawsByTitle)) {
+			return;
+		}
+
+		$missing_titles = $this->find_missing_commons_files(array_keys($rawsByTitle));
+
+		// Safety valve. A replica that answers but returns nothing useful
+		// would otherwise look like a mass deletion and wipe the catalogue.
+		$limit = max(
+			self::COMMONS_MISSING_MIN_ABSOLUTE,
+			(int) ceil(count($rawsByTitle) * self::COMMONS_MISSING_MAX_FRACTION),
+		);
+		if (count($missing_titles) > $limit) {
+			error_log(
+				"purge_deleted_commons_files: " . count($missing_titles) . " of " .
+				count($rawsByTitle) . " names reported missing, above the safety limit of " .
+				"{$limit} — aborting without deleting anything",
+			);
+			return;
+		}
+
+		$missing_raw = [];
+		foreach ($missing_titles as $title) {
+			foreach ($rawsByTitle[$title] as $raw) {
+				$missing_raw[] = $raw;
+			}
+		}
+		if (empty($missing_raw)) {
+			return;
+		}
+
+		$props = $this->commonsPropList();
+		$this->beginTransaction();
+		try {
+			foreach (array_chunk($missing_raw, self::COMMONS_PURGE_CHUNK) as $chunk) {
+				$list = $this->quoteList($chunk);
+				if ($props !== "") {
+					$sql = "DELETE FROM `file` WHERE `property` IN ({$props}) AND `key` IN ({$list})";
+					$this->tfc->getSQL($this->db, $sql);
+				}
+				foreach (["item", "person", "group"] as $table) {
+					$sql = "UPDATE `{$table}` SET `image`=NULL WHERE `image` IN ({$list})";
+					$this->tfc->getSQL($this->db, $sql);
+				}
+			}
+			$this->commit();
+		} catch (\Throwable $e) {
+			$this->rollback();
+			throw $e;
+		}
+		print "Purged " . count($missing_raw) . " reference(s) to " .
+			count($missing_titles) . " deleted Commons file(s)\n";
+	}
+
+	/**
+	 * Every distinct Commons file name referenced by the tool DB, keyed by
+	 * its canonical commonswiki page title. The value is the list of raw
+	 * spellings found in our tables, so the caller can delete by the exact
+	 * stored string.
+	 *
+	 * @return array<string, list<string>>
+	 */
+	protected function collect_commons_file_names(): array
+	{
+		$sources = [];
+		$props = $this->commonsPropList();
+		if ($props !== "") {
+			$sources[] = "SELECT DISTINCT `key` AS `name` FROM `file` WHERE `property` IN ({$props})";
+		}
+		foreach (["item", "person", "group"] as $table) {
+			$sources[] = "SELECT DISTINCT `image` AS `name` FROM `{$table}` " .
+				"WHERE `image` IS NOT NULL AND `image`!=''";
+		}
+
+		$rawsByTitle = [];
+		foreach ($sources as $sql) {
+			$result = $this->tfc->getSQL($this->db, $sql);
+			while ($o = $result->fetch_object()) {
+				$raw = (string) $o->name;
+				$title = self::commonsPageTitle($raw);
+				if ($title === "") {
+					continue;
+				}
+				$rawsByTitle[$title][$raw] = $raw;
+			}
+			$this->freeResult($result);
+		}
+		return array_map("array_values", $rawsByTitle);
+	}
+
+	/**
+	 * Of the given canonical commonswiki page titles, return those with no
+	 * ns-6 page — i.e. deleted files.
+	 *
+	 * A chunk that yields no hits at all is treated as a failed lookup and
+	 * skipped: it is far likelier that the replica query went wrong than
+	 * that every file in the chunk was deleted.
+	 *
+	 * @param list<string> $titles
+	 * @return list<string>
+	 */
+	protected function find_missing_commons_files(array $titles): array
+	{
+		$dbc = $this->tfc->openDBwiki("commonswiki");
+		// Same reasoning as make_rc_unavailable(): replica scans can be
+		// slower than tool-DB queries, so allow a longer ceiling.
+		$this->applyDbStatementTimeout($dbc, 120);
+
+		$missing = [];
+		foreach (array_chunk($titles, self::COMMONS_EXISTS_CHUNK) as $chunk) {
+			$list = $this->quoteList($chunk);
+			$sql = "SELECT `page_title` AS `name` FROM `page` " .
+				"WHERE `page_namespace`=6 AND `page_title` IN ({$list})";
+			$result = $this->tfc->getSQL($dbc, $sql);
+			$alive = [];
+			while ($o = $result->fetch_object()) {
+				$alive[(string) $o->name] = true;
+			}
+			$this->freeResult($result);
+			if (empty($alive)) {
+				error_log(
+					"find_missing_commons_files: no hits for a chunk of " . count($chunk) .
+					" names — treating as a failed lookup and skipping",
+				);
+				continue;
+			}
+			foreach ($chunk as $title) {
+				if (!isset($alive[$title])) {
+					$missing[] = $title;
+				}
+			}
+		}
+		return $missing;
+	}
+
+	/**
+	 * Comma-separated list of the property IDs whose `file` rows hold
+	 * Commons file names. Empty string when none are configured.
+	 */
+	protected function commonsPropList(): string
+	{
+		return implode(",", array_map("intval", $this->config->commons_file_props ?? []));
+	}
+
+	/**
+	 * Canonical commonswiki page title for a Commons file name: no "File:"
+	 * prefix, spaces as underscores. Case is deliberately left alone —
+	 * Wikidata's commonsMedia datatype already stores the canonical,
+	 * first-letter-capitalised title, and ucfirst() would corrupt a
+	 * multi-byte first character.
+	 */
+	protected static function commonsPageTitle(string $name): string
+	{
+		$name = trim($name);
+		if (stripos($name, "File:") === 0) {
+			$name = trim(substr($name, 5));
+		}
+		return str_replace(" ", "_", $name);
+	}
+
+	/**
+	 * Escape and quote each value into a comma-separated SQL list for use
+	 * in an `IN (...)` clause.
+	 *
+	 * @param list<string> $values
+	 */
+	protected function quoteList(array $values): string
+	{
+		return implode(
+			",",
+			array_map(
+				fn(string $v): string => "'" . $this->db->real_escape_string($v) . "'",
+				$values,
+			),
+		);
 	}
 
 	public function update_from_sparql(): void

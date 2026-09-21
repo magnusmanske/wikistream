@@ -36,6 +36,13 @@
 	# multiple instance-of claims.
 	public $episode_type_qs = [];
 
+	# Subset of $file_props whose values are Commons file names
+	# (P10 video, P51 audio, …). Used by
+	# WikiStream::purge_deleted_commons_files() to decide which `file`
+	# rows can be existence-checked against the commonswiki replica.
+	# Leave empty to disable the deleted-file purge.
+	public $commons_file_props = [];
+
 	# Root Q-numbers that define the tool's scope: an item is only
 	# admissible as a "primary" entry when at least one of its P31
 	# values walks the P279* tree up to one of these roots. Enforced at
@@ -182,6 +189,7 @@ class WikiStreamConfigWikiFlix extends WikiStreamConfig
 	public $misc_section_props = [31, 166, 136, 462, 495, 364, 361];
 	public $grouping_props = [];
 	public $file_props = [10, 724, 1651, 4015, 11731];
+	public $commons_file_props = [10];
 	public $bad_sections = [11424];
 	public $skip_section_q = [838368, 226730];
 
@@ -328,6 +336,7 @@ class WikiStreamConfigWikiVibes extends WikiStreamConfig
 	];
 	public $grouping_props = [361];
 	public $file_props = [51];
+	public $commons_file_props = [51];
 	public $bad_sections = [105543609];
 	public $skip_section_q = [838368, 226730];
 	public $interface_config = [
