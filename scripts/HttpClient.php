@@ -38,8 +38,8 @@ class CurlHttpClient implements HttpClientInterface
 	/** Maximum simultaneous in-flight requests in getJsonBatch(). */
 	private int $concurrency;
 
-	/** @var \CurlHandle|resource|null Reused across calls. */
-	private $ch = null;
+	/** Reused across calls; freed with the object (curl_close() is a no-op since PHP 8.0). */
+	private ?\CurlHandle $ch = null;
 
 	public function __construct(
 		string $userAgent = "Mozilla/5.0 (Windows NT 5.1; rv:31.0) Gecko/20100101 Firefox/31.0",
@@ -55,14 +55,6 @@ class CurlHttpClient implements HttpClientInterface
 		$this->maxAttempts    = max(1, $maxAttempts);
 		$this->backoffUs      = $backoffUs;
 		$this->concurrency    = max(1, $concurrency);
-	}
-
-	public function __destruct()
-	{
-		if ($this->ch !== null) {
-			curl_close($this->ch);
-			$this->ch = null;
-		}
 	}
 
 	public function getJson(string $url): ?object
@@ -282,7 +274,6 @@ class CurlHttpClient implements HttpClientInterface
 			$results[$k] = [$body !== null ? $body : false, $code, $errno, $errstr];
 
 			curl_multi_remove_handle($mh, $ch);
-			curl_close($ch);
 		}
 		curl_multi_close($mh);
 
