@@ -106,7 +106,11 @@ class WikiStream implements ItemViewReader
 			return;
 		}
 		try {
-			$this->tfc->getSQL($db, "SET SESSION max_statement_time = {$sec}");
+			// getSQL() takes its arguments by reference, so the statement
+			// must live in a variable; a literal throws "could not be
+			// passed by reference" before the query is ever sent.
+			$sql = "SET SESSION max_statement_time = {$sec}";
+			$this->tfc->getSQL($db, $sql);
 		} catch (\Throwable $e) {
 			// Don't kill the cron if max_statement_time isn't supported.
 			error_log("applyDbStatementTimeout: failed to set timeout: " . $e->getMessage());

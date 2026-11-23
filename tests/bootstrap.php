@@ -13,7 +13,10 @@ if (!class_exists('ToolforgeCommon')) {
         public function __construct(string $toolkey = '') {}
         public function openDBtool(string $db): object { return new class {}; }
         public function openDBwiki(string $wiki): object { return new class {}; }
-        public function getSQL(object $db, string $sql): object
+        // Mirrors the production signature: both arguments are passed by
+        // reference. Keep it that way — a by-value stub hides the "could not
+        // be passed by reference" bug that passing a string literal causes.
+        public function getSQL(object &$db, string &$sql, int $max_tries = 5, string $message = ''): object
         {
             return new class {
                 public function fetch_object(): false { return false; }

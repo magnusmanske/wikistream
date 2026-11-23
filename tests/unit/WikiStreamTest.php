@@ -3684,6 +3684,42 @@ final class WikiStreamTest extends TestCase
         }
     }
 
+    /**
+     * The real ToolforgeCommon::getSQL() takes both arguments by reference,
+     * so passing a string literal as the statement throws
+     * "Argument #2 ($sql) could not be passed by reference" before any query
+     * is sent. This fake mirrors that signature, so the test fails if the
+     * call site regresses to a literal.
+     */
+    public function test_set_session_passes_sql_through_a_variable_for_by_reference_getSQL(): void
+    {
+        $config = new \WikiStreamConfigWikiFlix();
+        $config->db_statement_timeout_sec = 30;
+
+        $tfc = new class($this->makeFakeDb()) {
+            public array $sqlCalls = [];
+
+            public function __construct(private object $db) {}
+
+            public function openDBtool(string $db): object
+            {
+                return $this->db;
+            }
+
+            public function getSQL(object &$db, string &$sql, int $max_tries = 5, string $message = ''): object
+            {
+                $this->sqlCalls[] = $sql;
+                return new class {
+                    public function fetch_object(): false { return false; }
+                };
+            }
+        };
+
+        new \WikiStream($config, $tfc);
+
+        $this->assertSame(['SET SESSION max_statement_time = 30'], $tfc->sqlCalls);
+    }
+
     // ------------------------------------------------------------------
     // update_item_no_files_search_results — batched IA lookups.
     //
